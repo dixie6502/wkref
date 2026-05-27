@@ -1,0 +1,5 @@
+# Compiled binary
+/wkref
+
+# Temporary docs, sandboxes, scratch test trees
+/tmp/
