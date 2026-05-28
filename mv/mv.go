@@ -36,11 +36,16 @@ type Result struct {
 	DryRun       bool
 }
 
-// Run moves oldPath to newPath and rewrites references. The root is the first
-// ancestor of oldPath holding the marker. With dryRun set it computes the plan
-// and writes nothing. It refuses (returns an error, writes nothing) when the
-// old basename is ambiguous or the new basename already exists in the tree.
-func Run(oldPath, newPath string, dryRun bool) (*Result, error) {
+// Run moves oldPath to newPath within root and rewrites references. Both paths
+// must resolve inside root. With dryRun set it computes the plan and writes
+// nothing. It refuses (returns an error, writes nothing) when the old basename
+// is ambiguous or the new basename already exists in the tree.
+func Run(root, oldPath, newPath string, dryRun bool) (*Result, error) {
+	tr, err := tree.Resolve(root)
+	if err != nil {
+		return nil, err
+	}
+
 	oldAbs, err := filepath.Abs(oldPath)
 	if err != nil {
 		return nil, err
@@ -52,16 +57,17 @@ func Run(oldPath, newPath string, dryRun bool) (*Result, error) {
 	if oldAbs == newAbs {
 		return nil, fmt.Errorf("source and destination are the same path")
 	}
+	if !tr.Contains(oldAbs) {
+		return nil, fmt.Errorf("source %s is outside root %s", oldPath, tr.Root)
+	}
+	if !tr.Contains(newAbs) {
+		return nil, fmt.Errorf("destination %s is outside root %s", newPath, tr.Root)
+	}
 	if !fileExists(oldAbs) {
 		return nil, fmt.Errorf("source file does not exist: %s", oldPath)
 	}
 	if fileExists(newAbs) {
 		return nil, fmt.Errorf("destination already exists: %s", newPath)
-	}
-
-	tr, err := tree.Resolve("", oldAbs)
-	if err != nil {
-		return nil, err
 	}
 
 	oldBase := basename(oldAbs)
@@ -74,8 +80,8 @@ func Run(oldPath, newPath string, dryRun bool) (*Result, error) {
 		return nil, fmt.Errorf("destination basename %q already exists in tree", newBase)
 	}
 
-	oldRel := rel(tr.Root, oldAbs)
-	newRel := rel(tr.Root, newAbs)
+	oldRel := tr.Rel(oldAbs)
+	newRel := tr.Rel(newAbs)
 	result := &Result{
 		Rename: Rename{OldPath: oldRel, NewPath: newRel},
 		DryRun: dryRun,
@@ -151,14 +157,6 @@ func remapSelfLinks(reps []Replacement, oldRel, newRel string) {
 
 func basename(path string) string {
 	return strings.TrimSuffix(filepath.Base(path), ".md")
-}
-
-func rel(root, abs string) string {
-	r, err := filepath.Rel(root, abs)
-	if err != nil {
-		return abs
-	}
-	return filepath.ToSlash(r)
 }
 
 func fileExists(path string) bool {

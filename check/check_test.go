@@ -21,7 +21,7 @@ func load(t *testing.T, files map[string]string) *tree.Tree {
 			t.Fatal(err)
 		}
 	}
-	tr, err := tree.Resolve(root, "")
+	tr, err := tree.Resolve(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,6 @@ func load(t *testing.T, files map[string]string) *tree.Tree {
 
 func TestCheckBroken(t *testing.T) {
 	tr := load(t, map[string]string{
-		".wikijump": "",
 		"index.md":  "[[exists]] and [[missing]]",
 		"exists.md": "ok",
 	})
@@ -51,7 +50,6 @@ func TestCheckBroken(t *testing.T) {
 
 func TestCheckCollisions(t *testing.T) {
 	tr := load(t, map[string]string{
-		".wikijump": "",
 		"a/todo.md": "[[a/todo]]",
 		"b/todo.md": "x",
 		"index.md":  "[[todo]]",
@@ -71,9 +69,8 @@ func TestCheckCollisions(t *testing.T) {
 
 func TestCheckClean(t *testing.T) {
 	tr := load(t, map[string]string{
-		".wikijump": "",
-		"index.md":  "[[a]]",
-		"a.md":      "[[index]]",
+		"index.md": "[[a]]",
+		"a.md":     "[[index]]",
 	})
 	res, err := Run(tr)
 	if err != nil {

@@ -1,7 +1,8 @@
-// Package tree resolves the root for a path and enumerates the markdown files
-// under it. The resolution rule and the exclusion of underscore/dot
-// directories match wikijump.vim, so wkref operates on exactly the files the
-// editor can resolve a [[link]] to.
+// Package tree resolves a root path and enumerates the markdown files under
+// it. The root is supplied explicitly by the caller; the tool does not look
+// for a marker file or walk up the directory hierarchy. Underscore- and
+// dot-prefixed directories are excluded, the convention for drafts, templates,
+// and archives outside the addressable namespace.
 package tree
 
 import (
@@ -14,14 +15,9 @@ import (
 	"strings"
 )
 
-// Marker names a root. StopMarkers (plus $HOME and the filesystem root) bound
-// the upward walk.
-const Marker = ".wikijump"
-
-var stopMarkers = []string{".git"}
-
-// ErrNoMarker is returned when no root holding the marker can be resolved.
-var ErrNoMarker = errors.New("no .wikijump marker found")
+// ErrInvalidRoot is returned when the supplied root path does not exist or is
+// not a directory.
+var ErrInvalidRoot = errors.New("invalid root")
 
 // A Tree is a resolved root and its enumerated markdown files. Files are
 // root-relative slash paths; Index maps each basename (without ".md") to the
@@ -32,64 +28,28 @@ type Tree struct {
 	Index map[string][]string
 }
 
-// Resolve loads the tree for a command. A non-empty rootFlag is used directly
-// (and must contain the marker); otherwise resolution walks up from start.
-// Returns ErrNoMarker when no root is found.
-func Resolve(rootFlag, start string) (*Tree, error) {
-	var root string
-	if rootFlag != "" {
-		abs, err := filepath.Abs(rootFlag)
-		if err != nil {
-			return nil, err
-		}
-		if !fileExists(filepath.Join(abs, Marker)) {
-			return nil, fmt.Errorf("%w: no %s under %s", ErrNoMarker, Marker, abs)
-		}
-		root = abs
-	} else {
-		r, err := FindRoot(start)
-		if err != nil {
-			return nil, err
-		}
-		if r == "" {
-			return nil, ErrNoMarker
-		}
-		root = r
+// Resolve canonicalizes root and enumerates its markdown files. It errors with
+// ErrInvalidRoot when root is empty, does not exist, or is not a directory.
+func Resolve(root string) (*Tree, error) {
+	if root == "" {
+		return nil, fmt.Errorf("%w: empty path", ErrInvalidRoot)
 	}
-	return load(root)
-}
-
-// FindRoot walks up from start to the first directory containing the marker,
-// stopping at a stop marker, $HOME, or the filesystem root. An empty result
-// means no root was found (not an error). The marker is checked before stop
-// markers so a root that also holds a stop marker (e.g. .git) still resolves.
-func FindRoot(start string) (string, error) {
-	dir, err := filepath.Abs(start)
+	abs, err := filepath.Abs(root)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
-		dir = filepath.Dir(dir)
+	abs, err = filepath.EvalSymlinks(abs)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s: %v", ErrInvalidRoot, root, err)
 	}
-	home, _ := os.UserHomeDir()
-	for {
-		if fileExists(filepath.Join(dir, Marker)) {
-			return dir, nil
-		}
-		for _, s := range stopMarkers {
-			if pathExists(filepath.Join(dir, s)) {
-				return "", nil
-			}
-		}
-		if dir == home {
-			return "", nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", nil
-		}
-		dir = parent
+	fi, err := os.Stat(abs)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s: %v", ErrInvalidRoot, root, err)
 	}
+	if !fi.IsDir() {
+		return nil, fmt.Errorf("%w: %s is not a directory", ErrInvalidRoot, root)
+	}
+	return load(abs)
 }
 
 // load enumerates every .md file under root, pruning directories whose name
@@ -134,16 +94,31 @@ func (tr *Tree) Abs(rel string) string {
 	return filepath.Join(tr.Root, filepath.FromSlash(rel))
 }
 
+// Rel returns the root-relative slash path of abs, the inverse of Abs. If abs
+// is not under the root the original path is returned unchanged.
+func (tr *Tree) Rel(abs string) string {
+	r, err := filepath.Rel(tr.Root, abs)
+	if err != nil {
+		return abs
+	}
+	return filepath.ToSlash(r)
+}
+
+// Contains reports whether abs lies inside the tree's root. The destination of
+// an mv may not exist yet, so a path that cannot be symlink-evaluated falls
+// back to a lexical clean rather than failing.
+func (tr *Tree) Contains(abs string) bool {
+	clean, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		clean = filepath.Clean(abs)
+	}
+	rel, err := filepath.Rel(tr.Root, clean)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 func isExcludedName(name string) bool {
 	return strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".")
-}
-
-func fileExists(path string) bool {
-	fi, err := os.Stat(path)
-	return err == nil && !fi.IsDir()
-}
-
-func pathExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }

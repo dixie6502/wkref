@@ -37,12 +37,11 @@ func exists(path string) bool {
 
 func TestRenameRewritesReferences(t *testing.T) {
 	root := build(t, map[string]string{
-		".wikijump":    "",
 		"index.md":     "see [[foo]] and [[foo|Alias]]",
 		"notes/foo.md": "# Foo",
 		"notes/x.md":   "no links here",
 	})
-	res, err := Run(filepath.Join(root, "notes/foo.md"), filepath.Join(root, "notes/bar.md"), false)
+	res, err := Run(root, filepath.Join(root, "notes/foo.md"), filepath.Join(root, "notes/bar.md"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,11 +61,10 @@ func TestRenameRewritesReferences(t *testing.T) {
 
 func TestPureFolderMoveNoRewrites(t *testing.T) {
 	root := build(t, map[string]string{
-		".wikijump":    "",
 		"index.md":     "[[foo]]",
 		"notes/foo.md": "x",
 	})
-	res, err := Run(filepath.Join(root, "notes/foo.md"), filepath.Join(root, "moved/foo.md"), false)
+	res, err := Run(root, filepath.Join(root, "notes/foo.md"), filepath.Join(root, "moved/foo.md"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,12 +81,11 @@ func TestPureFolderMoveNoRewrites(t *testing.T) {
 
 func TestCollisionRefuses(t *testing.T) {
 	root := build(t, map[string]string{
-		".wikijump":    "",
 		"index.md":     "[[foo]]",
 		"notes/foo.md": "x",
 		"bar.md":       "existing",
 	})
-	_, err := Run(filepath.Join(root, "notes/foo.md"), filepath.Join(root, "notes/bar.md"), false)
+	_, err := Run(root, filepath.Join(root, "notes/foo.md"), filepath.Join(root, "notes/bar.md"), false)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -103,11 +100,10 @@ func TestCollisionRefuses(t *testing.T) {
 
 func TestAmbiguousSourceRefuses(t *testing.T) {
 	root := build(t, map[string]string{
-		".wikijump": "",
-		"a/foo.md":  "x",
-		"b/foo.md":  "y",
+		"a/foo.md": "x",
+		"b/foo.md": "y",
 	})
-	_, err := Run(filepath.Join(root, "a/foo.md"), filepath.Join(root, "a/baz.md"), false)
+	_, err := Run(root, filepath.Join(root, "a/foo.md"), filepath.Join(root, "a/baz.md"), false)
 	if err == nil {
 		t.Fatal("expected ambiguity error, got nil")
 	}
@@ -118,11 +114,10 @@ func TestAmbiguousSourceRefuses(t *testing.T) {
 
 func TestDryRunWritesNothing(t *testing.T) {
 	root := build(t, map[string]string{
-		".wikijump":    "",
 		"index.md":     "[[foo]]",
 		"notes/foo.md": "x",
 	})
-	res, err := Run(filepath.Join(root, "notes/foo.md"), filepath.Join(root, "notes/bar.md"), true)
+	res, err := Run(root, filepath.Join(root, "notes/foo.md"), filepath.Join(root, "notes/bar.md"), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,12 +132,35 @@ func TestDryRunWritesNothing(t *testing.T) {
 	}
 }
 
+func TestSourceOutsideRootRefuses(t *testing.T) {
+	root := build(t, map[string]string{"notes/foo.md": "x"})
+	outside := build(t, map[string]string{"foo.md": "x"})
+	_, err := Run(root, filepath.Join(outside, "foo.md"), filepath.Join(root, "bar.md"), false)
+	if err == nil {
+		t.Fatal("expected error for source outside root, got nil")
+	}
+	if !exists(filepath.Join(outside, "foo.md")) {
+		t.Error("source outside root was moved")
+	}
+}
+
+func TestDestinationOutsideRootRefuses(t *testing.T) {
+	root := build(t, map[string]string{"notes/foo.md": "x"})
+	outside := build(t, map[string]string{})
+	_, err := Run(root, filepath.Join(root, "notes/foo.md"), filepath.Join(outside, "bar.md"), false)
+	if err == nil {
+		t.Fatal("expected error for destination outside root, got nil")
+	}
+	if !exists(filepath.Join(root, "notes/foo.md")) {
+		t.Error("source moved despite destination outside root")
+	}
+}
+
 func TestSelfLinkRewritten(t *testing.T) {
 	root := build(t, map[string]string{
-		".wikijump":    "",
 		"notes/foo.md": "I am [[foo]] linking to myself",
 	})
-	_, err := Run(filepath.Join(root, "notes/foo.md"), filepath.Join(root, "notes/bar.md"), false)
+	_, err := Run(root, filepath.Join(root, "notes/foo.md"), filepath.Join(root, "notes/bar.md"), false)
 	if err != nil {
 		t.Fatal(err)
 	}

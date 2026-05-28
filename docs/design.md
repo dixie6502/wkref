@@ -4,7 +4,7 @@ A record of choices made and the alternatives rejected, so the rationale survive
 
 ## Scope and boundaries
 
-**Two subcommands only: `mv` and `check`.** Both are chore operations — initiated deliberately, run occasionally, no interactive component. Queries (`links`, `backlinks`, `tags`), discovery (`graph`), index export, and editor wiring are out of scope. The tool earns its place because parsing wikilinks reliably across a tree is not shell work; everything beyond that earns its own place only when concrete friction appears.
+**Three subcommands: `mv`, `check`, and `orphans`.** All are chore operations — initiated deliberately, run occasionally, no interactive component. `mv` and `check` carry the integrity work; `orphans` is a read-only discoverability aid split out from `check` because finding unreferenced files is informational, not a pass/fail integrity test. Queries (`links`, `backlinks`, `tags`), discovery (`graph`), index export, and editor wiring are out of scope. The tool earns its place because parsing wikilinks reliably across a tree is not shell work; everything beyond that earns its own place only when concrete friction appears.
 
 **Wikilinks only.** Path links (`[text](foo.md)`) are `mdref`'s domain. Embedded images, HTML, frontmatter references are not parsed. The grammar handled is exactly the four-form wikilink: `[[t]]`, `[[t|alias]]`, `[[t#anchor]]`, `[[t#anchor|alias]]`. Anything else is ignored.
 
@@ -14,7 +14,7 @@ A record of choices made and the alternatives rejected, so the rationale survive
 
 **Binary: `wkref`.** `wk` = wiki, `ref` = reference, parallel to `mdref` (`md` = markdown). Both tools are named after the *link syntax* they operate on, not the editor plugin that consumes them. Decoupling matters: `wkref` could be useful in any wikilink-based tree, not only ones using `wikijump.vim`. Rejected: `wjref` (couples identity to a specific consumer plugin), `wikiref` (`wiki` is overloaded — MediaWiki, DokuWiki, etc.), `wlref` (cryptic without buying clarity), `nbref` (loses the syntax-focused parallel with `mdref`).
 
-**Subcommands match Unix verbs where possible: `mv`, `check`.** Rejected: `rename` (longer, no advantage), `lint` (misleads — `check` doesn't auto-fix). `mv` echoes both `mdref mv` and the shell builtin, which is the right mental model.
+**Subcommands match Unix verbs where possible: `mv`, `check`, `orphans`.** Rejected: `rename` (longer, no advantage), `lint` (misleads — `check` doesn't auto-fix). `mv` echoes both `mdref mv` and the shell builtin, which is the right mental model.
 
 ## Language: Go
 
@@ -33,17 +33,19 @@ No external markdown-link library — wikilink syntax is too small and specific 
 
 ## `mv` semantics
 
-**`wkref mv <old> <new>`** moves the file and rewrites every `[[…]]` whose target basename matches `<old>`'s basename, replacing only the target portion. Anchors and aliases are preserved.
+**`wkref mv <old> <new> --root <dir>`** moves the file and rewrites every `[[…]]` whose target basename matches `<old>`'s basename, replacing only the target portion. Anchors and aliases are preserved.
+
+**`--root` is required for `mv`.** `mv` is the one destructive command, so its scope is never inferred from the current directory. `check` and `orphans` are read-only and default `--root` to `.`. Both `<old>` and `<new>` must resolve inside `--root`; a path escaping it is refused. Rejected: a positional `<root>` operand (breaks the familiar `mv <old> <new>` shape) and a shared default for `mv` (a typo'd cwd would silently rewrite the wrong tree).
 
 **Basename, not path.** Matches the resolution model: `[[foo]]` resolves by basename, so rewrites match by basename. Same file moved between folders without renaming: zero rewrites needed (links still resolve). Filename actually changed: every reference updated.
 
-**Default: dry-run off, JSON on demand.** Matches `mdref`'s shape. The flag set:
+**Default: dry-run off.** The flag set:
 
 ```
-wkref mv <old> <new> [--dry-run] [--format json|text] [--root <path>]
+wkref mv <old> <new> --root <dir> [--dry-run]
 ```
 
-JSON output: list of `{file, line, col, old_link, new_link}` replacements, plus the file rename event. Text output: same data, one event per line, human-readable.
+Output: the file rename event plus one `{file, line, col, old_link, new_link}` replacement per rewritten link, one event per line, human-readable.
 
 **Collisions refuse, do not overwrite.** If `<new>`'s basename already exists in the tree, `mv` errors and exits non-zero. Multiple files matching `<old>`'s basename: same — error. Forces the user to resolve ambiguity by hand. The tool will not guess.
 
@@ -51,29 +53,24 @@ JSON output: list of `{file, line, col, old_link, new_link}` replacements, plus 
 
 ## `check` semantics
 
-**`wkref check`** reports three categories, each catching a real silent failure:
+**`wkref check`** reports two categories of integrity fault, each catching a real silent failure:
 
 1. **Broken** — wikilinks whose target basename has no matching `.md` file in the tree.
 2. **Collisions** — basenames shared by two or more files, making `[[name]]` ambiguous.
-3. **Orphans** — files with no incoming wikilinks. Informational only — orphan files are valid (e.g., `index.md`).
 
 **Exit codes:**
 
-- `0` — no broken, no collisions (orphans OK)
+- `0` — no broken, no collisions
 - `1` — broken or collisions present
-- `2` — usage error or marker not found
+- `2` — usage error or invalid root
 
 Lets `wkref check` slot into git pre-commit hooks or cron without further plumbing.
 
-**JSON output** mirrors text:
+**Output** is text, one finding per line: `broken: <file>:<line> [[<target>]]` for broken links and `collision: <basename> -> <file>, <file>` for shared basenames. Pass/fail is the exit code, not the text.
 
-```json
-{
-  "broken": [{"file": "...", "line": 42, "link": "old-name"}],
-  "collisions": [{"basename": "todo", "files": ["a/todo.md", "b/todo.md"]}],
-  "orphans": ["abandoned.md"]
-}
-```
+## `orphans` semantics
+
+**`wkref orphans`** lists files with no incoming wikilink — a discoverability aid, not an integrity test. An orphan is a valid file (e.g. `index.md`), so the command always exits `0` on success and emits one `orphan: <file>` line per file. Split from `check` precisely because it makes no pass/fail judgment.
 
 ## Wikilink grammar handled
 
@@ -97,38 +94,40 @@ Goldmark's AST traversal gives the first three for free. HTML handling is heuris
 
 **Escapes:** `\[\[foo\]\]` is left alone. Pragmatic — rare in practice, but cheap to honor.
 
-## Marker detection
+## Root resolution
 
-**Walk up from the target file looking for `.wikijump`, stopping at `.git`, `$HOME`, or filesystem root.** Identical rule and stop markers to `wikijump.vim`. The marker file's contents are read but only the first-line landing-page override is parsed (mostly irrelevant to `wkref`, but cheap to honor for forward compatibility).
+**The root is given explicitly via `--root <dir>`; no marker file, no walk-up.** Earlier versions walked up from the target file looking for a `.wikijump` marker, matching `wikijump.vim`'s rule. That coupled `wkref` to a `wikijump`-specific convention and required users to plant a marker before the tool would run. Dropping it makes `wkref` standalone and agnostic to whatever editor reads the tree — consistent with the naming rationale (named after the *link syntax*, not the consumer plugin).
 
-**`--root <path>` overrides the walk.** Useful for cron, CI, or operating on a tree other than the one containing CWD.
+**Tradeoff accepted:** the "run from anywhere inside the tree" ergonomic is gone — you name the root, or rely on the `.` default for `check`/`orphans`. Parity with `wikijump.vim`'s in-editor resolution is no longer guaranteed when the editor treats a subdirectory as its own tree; `wkref` operates on exactly the directory you hand it. Both are deliberate: decoupling is worth more than the walk-up convenience for a tool meant to work on any wikilink tree.
 
-**No marker found:** error and exit `2`. The tool refuses to operate without a defined scope.
+**Defaults are asymmetric.** `check` and `orphans` are read-only and default `--root` to `.`. `mv` is destructive and requires `--root` explicitly — same logic as never inferring a destination for `rm`.
+
+**Invalid root:** the path must exist and be a directory (resolved through symlinks). Anything else errors and exits `2`. No further validation — the tool trusts that a real directory is a real tree.
 
 ## Configuration
 
-**Zero config files.** All behavior is controlled by flags. The `.wikijump` marker is presence-detected, not parsed for `wkref`-specific settings. If a setting ever earns its place, it goes on the CLI or — last resort — into the marker file using the documented upgrade path (`{ … }` JSON on line 1).
+**Zero config files.** All behavior is controlled by flags. There is no marker file and nothing on disk is parsed for settings. If a setting ever earns its place, it goes on the CLI.
 
 **Flag surface (intentionally small):**
 
 | Flag | Subcommands | Purpose |
 |---|---|---|
-| `--root <path>` | both | Override walk-up resolution |
-| `--format <json\|text>` | both | Output format; default `text` |
+| `--root <dir>` | all | Tree to operate on. Default `.` for `check`/`orphans`; required for `mv`. |
 | `--dry-run` | `mv` | Plan without writing |
 
-No `--exclude`, no `--verbose`, no `--config`. Add only when forced by real friction.
+No `--format`, no `--exclude`, no `--verbose`, no `--config`. Output is text only. Add only when forced by real friction.
 
 ## File layout
 
 ```
 wkref/
 ├── main.go        # CLI entry, flag parsing, subcommand dispatch
-├── tree/          # walk-up, .wikijump detection, file enumeration
+├── tree/          # root validation, containment check, file enumeration
 ├── wikilink/      # scanner (goldmark skip-ranges), parser, rewrite
 ├── mv/            # rename + rewrite orchestration
-├── check/         # broken/collision/orphan analysis
-├── output/        # text + JSON formatters
+├── check/         # broken/collision analysis
+├── orphans/       # unreferenced-file analysis
+├── output/        # text formatters
 └── go.mod
 ```
 
@@ -147,7 +146,7 @@ Target: ~400 lines of Go excluding tests. Tests roughly 1:1 with implementation 
 - **No interactive UI.** No pickers, no prompts, no TUI. Composable with `fzf` from the shell if wanted.
 - **No edit operations beyond `mv`.** No "add tag", no "fix broken link interactively", no template stamping. Editor work, not tool work.
 - **No path-link handling.** `mdref` exists.
-- **No vim integration.** `wkref` emits paths/JSON and exits; opening files is the caller's business, never the tool's.
+- **No vim integration.** `wkref` emits text and exits; opening files is the caller's business, never the tool's.
 - **No frontmatter parsing in v1.** Adds a dependency, doesn't earn its place until `tags` or similar arrives — and that's out of scope.
 - **No multi-tree operations.** One tree per invocation. Cron a loop if needed.
 - **No partial rewrites or interactive resolution.** Collisions cause the operation to refuse, not prompt. The tool will not guess.

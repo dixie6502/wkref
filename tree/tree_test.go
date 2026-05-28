@@ -26,63 +26,52 @@ func build(t *testing.T, files map[string]string) string {
 	return root
 }
 
-func TestFindRootWalksUp(t *testing.T) {
+func TestResolveEnumeratesMarkdown(t *testing.T) {
 	root := build(t, map[string]string{
-		".wikijump":         "",
+		"index.md":          "x",
 		"notes/deep/foo.md": "x",
+		"notes/bar.txt":     "x", // not markdown, ignored
 	})
-	got, err := FindRoot(filepath.Join(root, "notes", "deep", "foo.md"))
+	tr, err := Resolve(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != root {
-		t.Errorf("got %q, want %q", got, root)
+	want := []string{"index.md", "notes/deep/foo.md"}
+	if !reflect.DeepEqual(tr.Files, want) {
+		t.Errorf("got files %v, want %v", tr.Files, want)
 	}
 }
 
-func TestFindRootStopsAtGit(t *testing.T) {
-	// A .git below the marker bounds the walk: no root above it.
-	root := build(t, map[string]string{
-		".wikijump":           "", // this is the temp root; marker here
-		"project/.git/HEAD":   "ref",
-		"project/sub/note.md": "x",
-	})
-	// Resolving from inside project/ must NOT find the outer marker, because
-	// .git halts the ascent first.
-	got, err := FindRoot(filepath.Join(root, "project", "sub", "note.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "" {
-		t.Errorf("expected no root (stopped at .git), got %q", got)
+func TestResolveRejectsMissingRoot(t *testing.T) {
+	_, err := Resolve(filepath.Join(t.TempDir(), "nope"))
+	if !errors.Is(err, ErrInvalidRoot) {
+		t.Errorf("got %v, want ErrInvalidRoot", err)
 	}
 }
 
-func TestFindRootMarkerBeatsGitAtSameDir(t *testing.T) {
-	// Marker and .git in the same directory: marker wins, that dir is root.
-	root := build(t, map[string]string{
-		".wikijump": "",
-		".git/HEAD": "ref",
-		"note.md":   "x",
-	})
-	got, err := FindRoot(filepath.Join(root, "note.md"))
-	if err != nil {
-		t.Fatal(err)
+func TestResolveRejectsFileRoot(t *testing.T) {
+	root := build(t, map[string]string{"note.md": "x"})
+	_, err := Resolve(filepath.Join(root, "note.md"))
+	if !errors.Is(err, ErrInvalidRoot) {
+		t.Errorf("got %v, want ErrInvalidRoot", err)
 	}
-	if got != root {
-		t.Errorf("got %q, want %q", got, root)
+}
+
+func TestResolveRejectsEmptyRoot(t *testing.T) {
+	_, err := Resolve("")
+	if !errors.Is(err, ErrInvalidRoot) {
+		t.Errorf("got %v, want ErrInvalidRoot", err)
 	}
 }
 
 func TestLoadExcludesUnderscoreAndDotDirs(t *testing.T) {
 	root := build(t, map[string]string{
-		".wikijump":          "",
 		"index.md":           "x",
 		"notes/foo.md":       "x",
 		"_templates/skip.md": "x",
 		".archive/old.md":    "x",
 	})
-	tr, err := Resolve("", root)
+	tr, err := Resolve(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,12 +83,11 @@ func TestLoadExcludesUnderscoreAndDotDirs(t *testing.T) {
 
 func TestLoadIndexesCollisions(t *testing.T) {
 	root := build(t, map[string]string{
-		".wikijump": "",
 		"a/todo.md": "x",
 		"b/todo.md": "x",
 		"unique.md": "x",
 	})
-	tr, err := Resolve("", root)
+	tr, err := Resolve(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,21 +99,21 @@ func TestLoadIndexesCollisions(t *testing.T) {
 	}
 }
 
-func TestResolveNoMarker(t *testing.T) {
-	root := build(t, map[string]string{"note.md": "x"}) // no marker
-	_, err := Resolve("", filepath.Join(root, "note.md"))
-	if !errors.Is(err, ErrNoMarker) {
-		t.Errorf("got %v, want ErrNoMarker", err)
-	}
-}
-
-func TestResolveRootFlag(t *testing.T) {
-	root := build(t, map[string]string{".wikijump": "", "x.md": "y"})
-	tr, err := Resolve(root, "/nonexistent/start")
+func TestContains(t *testing.T) {
+	root := build(t, map[string]string{"a/foo.md": "x"})
+	tr, err := Resolve(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tr.Root != root {
-		t.Errorf("got root %q, want %q", tr.Root, root)
+	cases := map[string]bool{
+		filepath.Join(root, "a", "foo.md"):      true,
+		filepath.Join(root, "b", "new.md"):      true, // does not exist yet
+		filepath.Join(root, "..", "outside.md"): false,
+		filepath.Dir(root):                      false,
+	}
+	for path, want := range cases {
+		if got := tr.Contains(path); got != want {
+			t.Errorf("Contains(%q) = %v, want %v", path, got, want)
+		}
 	}
 }

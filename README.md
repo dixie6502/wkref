@@ -4,8 +4,9 @@ A small Go CLI for the cross-file chores of a `[[wikilink]]`-based markdown
 tree: rename a file and rewrite every link to it, and check the tree for
 integrity problems. Small and opinionated.
 
-It operates on the tree under a `.wikijump` marker, within which filenames are
-addressed by basename as `[[wikilinks]]`. Sibling to `mdref` (same job for
+It operates on a tree you name explicitly (a directory), within which filenames
+are addressed by basename as `[[wikilinks]]`. It expects no marker file and is
+agnostic to the editor that reads the tree. Sibling to `mdref` (same job for
 `[text](path.md)` links); each is run on its own — they never call each other,
 and nothing composes them.
 
@@ -30,20 +31,22 @@ PRs won't be answered for the moment.
 
 Three subcommands, all chore operations — run occasionally, no interactive part.
 
-- `wkref mv <old> <new>` — move a file and rewrite every `[[link]]` whose target
-  basename matches. Paths are given in `dir/name.md` form, like the real `mv`;
-  the root is found by walking up from `<old>`. Anchors and aliases are
-  preserved (`[[old#h|Disp]]` → `[[new#h|Disp]]`). Refuses (writes nothing) if
-  the new name already exists or the old name is ambiguous.
-- `wkref check <root-path>` — report **broken** links (no target file) and
+- `wkref mv <old> <new> --root <dir>` — move a file and rewrite every `[[link]]`
+  whose target basename matches. Paths are given in `dir/name.md` form, like the
+  real `mv`; both must resolve inside `--root`. `--root` is **required** — `mv`
+  destroys, so its scope is never inferred. Anchors and aliases are preserved
+  (`[[old#h|Disp]]` → `[[new#h|Disp]]`). Refuses (writes nothing) if the new name
+  already exists or the old name is ambiguous.
+- `wkref check [--root <dir>]` — report **broken** links (no target file) and
   **collisions** (one basename, several files). These are integrity faults;
-  either makes it exit `1`.
-- `wkref orphans <root-path>` — list files with **no incoming link**. A
+  either makes it exit `1`. `--root` defaults to the current directory.
+- `wkref orphans [--root <dir>]` — list files with **no incoming link**. A
   discoverability aid, not an integrity test: it lists, it does not fail, and
-  always exits `0`.
+  always exits `0`. `--root` defaults to the current directory.
 
-`<root-path>` must be a root (a directory holding the `.wikijump` marker);
-`check` and `orphans` do not walk up.
+`--root` must be an existing directory; the tool does not walk up or look for a
+marker file. Read-only commands (`check`, `orphans`) default to `.`; `mv`
+requires the flag.
 
 Output is text, one event per line. Pass/fail is the exit code, not the text.
 
@@ -51,35 +54,30 @@ Flags:
 
 | Flag | Subcommands | Purpose |
 |---|---|---|
+| `--root <dir>` | all | Tree to operate on. Defaults to `.` for `check`/`orphans`; required for `mv`. |
 | `--dry-run` | `mv` | Print the plan; change nothing on disk. |
 
 Exit codes: `0` ok, `1` problems found (`check`) or operation refused (`mv`),
-`2` usage error or no marker. `orphans` exits `0` whenever it runs.
+`2` usage error or invalid root. `orphans` exits `0` whenever it runs.
 
 ## Usage
 
 ```sh
-# check/orphans take the root explicitly:
-wkref check .                                  # current dir is the root
-wkref orphans ~/notes/journal
+# check/orphans default to the current directory:
+wkref check                                            # check .
+wkref orphans --root ~/notes/journal
 
-# mv finds the root by walking up from <old>:
-wkref mv notes/old.md notes/new.md --dry-run   # preview
-wkref mv notes/old.md notes/new.md             # apply
+# mv requires --root explicitly:
+wkref mv notes/old.md notes/new.md --root . --dry-run  # preview
+wkref mv notes/old.md notes/new.md --root .            # apply
 ```
 
 ## The tree
 
-A tree is any folder with a `.wikijump` marker in it (the same marker
-`wikijump.vim` uses). Creating one:
-
-```sh
-touch .wikijump
-```
-
-Links resolve by basename across the whole tree (flat namespace). Directories
-whose name starts with `_` or `.` (e.g. `_templates/`, `.archive/`) are outside
-the tree's public surface and are skipped.
+A tree is any directory you point `--root` at. No marker file, no setup — links
+resolve by basename across the whole tree (flat namespace). Directories whose
+name starts with `_` or `.` (e.g. `_templates/`, `.archive/`) are outside the
+tree's public surface and are skipped.
 
 ## Install
 

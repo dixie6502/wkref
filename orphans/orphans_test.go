@@ -21,7 +21,7 @@ func load(t *testing.T, files map[string]string) *tree.Tree {
 			t.Fatal(err)
 		}
 	}
-	tr, err := tree.Resolve(root, "")
+	tr, err := tree.Resolve(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,6 @@ func load(t *testing.T, files map[string]string) *tree.Tree {
 
 func TestOrphans(t *testing.T) {
 	tr := load(t, map[string]string{
-		".wikijump": "",
 		"index.md":  "[[linked]]",
 		"linked.md": "x",
 		"orphan.md": "y",
@@ -48,9 +47,8 @@ func TestOrphans(t *testing.T) {
 
 func TestOrphansNoneWithMutualLinks(t *testing.T) {
 	tr := load(t, map[string]string{
-		".wikijump": "",
-		"index.md":  "[[a]]",
-		"a.md":      "[[index]]",
+		"index.md": "[[a]]",
+		"a.md":     "[[index]]",
 	})
 	res, err := Run(tr)
 	if err != nil {

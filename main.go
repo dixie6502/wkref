@@ -19,7 +19,7 @@ import (
 
 // Exit codes. For check: 0 clean, 1 broken/collisions present. orphans always
 // exits 0 on success (it lists, it does not judge). For all: 2 on usage error
-// or no marker.
+// or an invalid root.
 const (
 	exitOK    = 0
 	exitDirty = 1
@@ -55,18 +55,20 @@ func run(args []string) int {
 func runMV(args []string) int {
 	fs := flag.NewFlagSet("mv", flag.ContinueOnError)
 	dryRun := fs.Bool("dry-run", false, "compute the plan without writing")
+	// No default: mv destroys, so the scope must be stated explicitly.
+	root := fs.String("root", "", "tree root (required)")
 	operands, err := parseFlags(fs, args)
 	if err != nil {
 		return exitUsage
 	}
-	if len(operands) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: wkref mv <old> <new> [--dry-run]")
+	if len(operands) != 2 || *root == "" {
+		fmt.Fprintln(os.Stderr, "usage: wkref mv <old> <new> --root <dir> [--dry-run]")
 		return exitUsage
 	}
-	result, err := mv.Run(operands[0], operands[1], *dryRun)
+	result, err := mv.Run(*root, operands[0], operands[1], *dryRun)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "wkref: %v\n", err)
-		if errors.Is(err, tree.ErrNoMarker) {
+		if errors.Is(err, tree.ErrInvalidRoot) {
 			return exitUsage
 		}
 		return exitDirty
@@ -76,19 +78,9 @@ func runMV(args []string) int {
 }
 
 func runCheck(args []string) int {
-	fs := flag.NewFlagSet("check", flag.ContinueOnError)
-	operands, err := parseFlags(fs, args)
-	if err != nil {
-		return exitUsage
-	}
-	if len(operands) != 1 {
-		fmt.Fprintln(os.Stderr, "usage: wkref check <root-path>")
-		return exitUsage
-	}
-	tr, err := tree.Resolve(operands[0], "")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "wkref: %v\n", err)
-		return exitUsage
+	tr, code := resolveReadOnly("check", args)
+	if tr == nil {
+		return code
 	}
 	result, err := check.Run(tr)
 	if err != nil {
@@ -103,19 +95,9 @@ func runCheck(args []string) int {
 }
 
 func runOrphans(args []string) int {
-	fs := flag.NewFlagSet("orphans", flag.ContinueOnError)
-	operands, err := parseFlags(fs, args)
-	if err != nil {
-		return exitUsage
-	}
-	if len(operands) != 1 {
-		fmt.Fprintln(os.Stderr, "usage: wkref orphans <root-path>")
-		return exitUsage
-	}
-	tr, err := tree.Resolve(operands[0], "")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "wkref: %v\n", err)
-		return exitUsage
+	tr, code := resolveReadOnly("orphans", args)
+	if tr == nil {
+		return code
 	}
 	result, err := orphans.Run(tr)
 	if err != nil {
@@ -124,6 +106,29 @@ func runOrphans(args []string) int {
 	}
 	output.Orphans(os.Stdout, result)
 	return exitOK
+}
+
+// resolveReadOnly parses a read-only subcommand whose only flag is --root
+// (default "."), rejects positional operands, and resolves the tree. On any
+// error it prints a message and returns a nil tree with the exit code to use;
+// otherwise it returns the tree and exitOK.
+func resolveReadOnly(name string, args []string) (*tree.Tree, int) {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	root := fs.String("root", ".", "tree root")
+	operands, err := parseFlags(fs, args)
+	if err != nil {
+		return nil, exitUsage
+	}
+	if len(operands) != 0 {
+		fmt.Fprintf(os.Stderr, "usage: wkref %s [--root <dir>]\n", name)
+		return nil, exitUsage
+	}
+	tr, err := tree.Resolve(*root)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "wkref: %v\n", err)
+		return nil, exitUsage
+	}
+	return tr, exitOK
 }
 
 // parseFlags parses fs allowing flags and positional operands to interleave,
@@ -157,8 +162,8 @@ func usage() {
 	fmt.Fprint(os.Stderr, `wkref — wikilink rename and integrity check
 
 usage:
-  wkref mv <old> <new> [--dry-run]
-  wkref check <root-path>
-  wkref orphans <root-path>
+  wkref mv <old> <new> --root <dir> [--dry-run]
+  wkref check [--root <dir>]      (root defaults to .)
+  wkref orphans [--root <dir>]    (root defaults to .)
 `)
 }
