@@ -72,6 +72,11 @@ wkref mv notes/old.md notes/new.md --root . --dry-run  # preview
 wkref mv notes/old.md notes/new.md --root .            # apply
 ```
 
+`mv` takes exactly one source and one destination — no globs, no multiple
+sources. Use plain `mv`/`git mv` to relocate files between folders: links
+resolve by basename, so a folder move changes nothing to rewrite. `wkref mv`
+is for the one case that does: renaming a file and following its links.
+
 ## The tree
 
 A tree is any directory you point `--root` at. No marker file, no setup — links

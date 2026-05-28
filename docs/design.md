@@ -148,6 +148,7 @@ Target: ~400 lines of Go excluding tests. Tests roughly 1:1 with implementation 
 - **No path-link handling.** `mdref` exists.
 - **No vim integration.** `wkref` emits text and exits; opening files is the caller's business, never the tool's.
 - **No frontmatter parsing in v1.** Adds a dependency, doesn't earn its place until `tags` or similar arrives — and that's out of scope.
+- **No multi-source or glob `mv`.** Exactly two operands; no `mv a b c dir/`, no pattern expansion. The only multi-file scenario is relocating files between folders, and since links resolve by basename, a folder move changes no basenames and so needs zero rewrites — plain `mv`/`git mv` already does the whole job. The one operation that *does* need `wkref` is a basename change, which is inherently single-file (one concept renamed at a time). Batch-renaming distinct basenames in one call is a rare, awkward workflow not worth designing for. Globbing, if ever wanted, is the shell's job, not the tool's.
 - **No multi-tree operations.** One tree per invocation. Cron a loop if needed.
 - **No partial rewrites or interactive resolution.** Collisions cause the operation to refuse, not prompt. The tool will not guess.
 - **No rollback on partial-write failure.** Filesystem reality. `--dry-run` is the answer.
