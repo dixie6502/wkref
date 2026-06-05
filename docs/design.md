@@ -4,7 +4,7 @@ A record of choices made and the alternatives rejected, so the rationale survive
 
 ## Scope and boundaries
 
-**Five subcommands: `mv`, `check`, `orphans`, `links`, and `backlinks`.** All are chore operations — initiated deliberately, run occasionally, no interactive component. `mv` and `check` carry the integrity work; `orphans`, `links`, and `backlinks` are read-only discoverability aids: informational listings, not pass/fail tests. Richer queries (`tags`), discovery (`graph`), index export, and editor wiring are out of scope. The tool earns its place because parsing wikilinks reliably across a tree is not shell work; everything beyond that earns its own place only when concrete friction appears.
+**Six subcommands: `mv`, `rm`, `check`, `orphans`, `links`, and `backlinks`.** All are chore operations — initiated deliberately, run occasionally, no interactive component. `mv`, `rm`, and `check` carry the integrity work; `orphans`, `links`, and `backlinks` are read-only discoverability aids: informational listings, not pass/fail tests. Richer queries (`tags`), discovery (`graph`), index export, and editor wiring are out of scope. The tool earns its place because parsing wikilinks reliably across a tree is not shell work; everything beyond that earns its own place only when concrete friction appears.
 
 **Wikilinks only.** Path links (`[text](foo.md)`) are `mdref`'s domain. Embedded images, HTML, frontmatter references are not parsed. The grammar handled is exactly the four-form wikilink: `[[t]]`, `[[t|alias]]`, `[[t#anchor]]`, `[[t#anchor|alias]]`. Anything else is ignored.
 
@@ -52,6 +52,22 @@ Output: the file rename event plus one `{file, line, col, old_link, new_link}` r
 **Collisions refuse, do not overwrite.** If `<new>`'s basename already exists in the tree, `mv` errors and exits non-zero. Multiple files matching `<old>`'s basename: same — error. Forces the user to resolve ambiguity by hand. The tool will not guess.
 
 **Atomicity.** All rewrites are computed first, then the file rename happens, then writes are applied. On any write failure, prior writes are not rolled back (filesystem reality), but the failure is reported with the list of files already modified. `--dry-run` exists precisely so this rarely happens.
+
+## `rm` semantics
+
+**`wkref rm <file> --root <dir> [--dry-run] [--force]`** deletes the file and unwraps every `[[…]]` that the deletion would break, replacing the whole link span with its plain display text: the alias if present, else the target; the anchor is dropped (`[[t]]` → `t`, `[[t|D]]` → `D`, `[[t#a]]` → `t`, `[[t#a|D]]` → `D`). Surrounding prose is untouched — same "targeted rewrite, no general markdown editing" rule as `mv`.
+
+**One rule decides everything: the gate set and the unwrap set are both "links the deletion would break."**
+
+- **Non-orphan without `--force`: refuse.** The tool is non-interactive, so the warning *is* a refusal: the error lists each would-be-broken link (`file:line [[link]]`), exits `1`, writes nothing. The refusal doubles as the preview; `--force` proceeds. Rejected: proceeding by default (deleting is more destructive than `mv`'s rename — a gate fits) and an interactive prompt (no prompts, by scope).
+- **Namesake collision: plain delete, zero unwraps, no gate.** If another tree file shares the basename, `[[name]]` still resolves to the survivor — unwrapping would destroy working links. Deleting one of two namesakes is also the natural way to *resolve* a collision, so refusing (as `mv` does for its source) would block the legitimate cleanup. Rejected: mirroring `mv`'s ambiguity refusal — `rm`'s operand is a path, so the file picked is never ambiguous; only the rewrite question is, and resolution-by-basename answers it.
+- **Self-links die with the file.** A `[[self]]` inside the deleted file never gates and is never unwrapped. Deliberate divergence from `orphans`/`backlinks`, where self-links count: refusing to delete a file because it links to itself would demand `--force` for nothing.
+
+**`--root` is required** — `rm` is destructive, the same "never infer the scope" rule as `mv` (and the original analogy: never inferring a destination for `rm`).
+
+**Atomicity, inverted from `mv`: writes first, delete last.** All unwraps are computed, the rewritten files are written in sorted order, and the target file is removed only after the last write succeeds. A partial write failure therefore leaves zero broken links: already-unwrapped files are lossy but resolvable prose, untouched files still resolve against the still-present target. Delete-first would leave broken links on failure — the exact corruption the tool exists to prevent. As with `mv`, no rollback; `--dry-run` is the answer.
+
+Output mirrors `mv`: the `delete <file>` event plus one `{file, line, col, old_link, new_text}` unwrap per line.
 
 ## `check` semantics
 
@@ -111,7 +127,7 @@ Goldmark's AST traversal gives the code contexts for free; frontmatter is detect
 
 **Tradeoff accepted:** the "run from anywhere inside the tree" ergonomic is gone — you name the root, or rely on the `.` default for `check`/`orphans`. Parity with `wikijump.vim`'s in-editor resolution is no longer guaranteed when the editor treats a subdirectory as its own tree; `wkref` operates on exactly the directory you hand it. Both are deliberate: decoupling is worth more than the walk-up convenience for a tool meant to work on any wikilink tree.
 
-**Defaults are asymmetric.** The read-only commands (`check`, `orphans`, `links`, `backlinks`) default `--root` to `.`. `mv` is destructive and requires `--root` explicitly — same logic as never inferring a destination for `rm`.
+**Defaults are asymmetric.** The read-only commands (`check`, `orphans`, `links`, `backlinks`) default `--root` to `.`. `mv` and `rm` are destructive and require `--root` explicitly — same logic as the shell's `rm` never inferring its target.
 
 **Invalid root:** the path must exist and be a directory (resolved through symlinks). Anything else errors and exits `2`. No further validation — the tool trusts that a real directory is a real tree.
 
@@ -123,8 +139,9 @@ Goldmark's AST traversal gives the code contexts for free; frontmatter is detect
 
 | Flag | Subcommands | Purpose |
 |---|---|---|
-| `--root <dir>` | all | Tree to operate on. Default `.` for read-only commands; required for `mv`. |
-| `--dry-run` | `mv` | Plan without writing |
+| `--root <dir>` | all | Tree to operate on. Default `.` for read-only commands; required for `mv` and `rm`. |
+| `--dry-run` | `mv`, `rm` | Plan without writing |
+| `--force` | `rm` | Delete even when it breaks links, unlinking them |
 
 No `--format`, no `--exclude`, no `--verbose`, no `--config`. Output is text only. Add only when forced by real friction. `-h`/`--help` on any subcommand prints its usage synopsis and exits `0` — asking for help is not a usage error.
 
@@ -136,6 +153,7 @@ wkref/
 ├── tree/          # root validation, containment check, file enumeration
 ├── wikilink/      # scanner (goldmark skip-ranges), parser, rewrite
 ├── mv/            # rename + rewrite orchestration
+├── rm/            # delete + unwrap orchestration
 ├── check/         # broken/collision analysis
 ├── orphans/       # unreferenced-file analysis
 ├── links/         # per-file forward/backward link queries
@@ -156,7 +174,7 @@ Target: ~400 lines of Go excluding tests. Tests roughly 1:1 with implementation 
 - **No queries beyond `links`/`backlinks`.** Tag listing and graph export stay out of scope. The per-file link queries were originally excluded too ("`rg` covers the 80% case") — reversed once the 20% mattered: `rg` cannot skip code fences or resolve basenames. See the `links`/`backlinks` section for the rationale.
 - **No `wkref index` subcommand.** The basename index is computed internally by `mv` and `check`; not exposed. Add back if a real external consumer appears.
 - **No interactive UI.** No pickers, no prompts, no TUI. Composable with `fzf` from the shell if wanted.
-- **No edit operations beyond `mv`.** No "add tag", no "fix broken link interactively", no template stamping. Editor work, not tool work.
+- **No edit operations beyond `mv` and `rm`.** No "add tag", no "fix broken link interactively", no template stamping. Editor work, not tool work.
 - **No path-link handling.** `mdref` exists.
 - **No vim integration.** `wkref` emits text and exits; opening files is the caller's business, never the tool's.
 - **No frontmatter parsing in v1.** Adds a dependency, doesn't earn its place until `tags` or similar arrives — and that's out of scope.

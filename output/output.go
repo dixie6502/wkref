@@ -11,6 +11,7 @@ import (
 	"github.com/alxn0/wkref/links"
 	"github.com/alxn0/wkref/mv"
 	"github.com/alxn0/wkref/orphans"
+	"github.com/alxn0/wkref/rm"
 )
 
 // MV writes an mv result: the rename and every rewritten link.
@@ -21,6 +22,17 @@ func MV(w io.Writer, r *mv.Result) {
 	fmt.Fprintf(w, "rename %s -> %s\n", r.Rename.OldPath, r.Rename.NewPath)
 	for _, rep := range r.Replacements {
 		fmt.Fprintf(w, "%s:%d:%d %s -> %s\n", rep.File, rep.Line, rep.Col, rep.OldLink, rep.NewLink)
+	}
+}
+
+// RM writes an rm result: the deletion and every unwrapped link.
+func RM(w io.Writer, r *rm.Result) {
+	if r.DryRun {
+		fmt.Fprintln(w, "dry run — no changes written")
+	}
+	fmt.Fprintf(w, "delete %s\n", r.Deleted)
+	for _, u := range r.Unlinks {
+		fmt.Fprintf(w, "%s:%d:%d %s -> %s\n", u.File, u.Line, u.Col, u.Old, u.New)
 	}
 }
 

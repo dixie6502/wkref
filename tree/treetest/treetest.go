@@ -36,3 +36,19 @@ func Load(t *testing.T, files map[string]string) *tree.Tree {
 	}
 	return tr
 }
+
+// Read returns the content of a fixture file, failing the test on error.
+func Read(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// Exists reports whether a fixture path is present on disk.
+func Exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}

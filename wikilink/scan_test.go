@@ -143,3 +143,77 @@ func TestRewriteNoMatchReturnsOriginal(t *testing.T) {
 		t.Errorf("expected unchanged src and nil edits, got %q / %+v", out, edits)
 	}
 }
+
+func TestPlainText(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{"basic", "[[t]]", "t"},
+		{"alias", "[[t|Display]]", "Display"},
+		{"anchor dropped", "[[t#anchor]]", "t"},
+		{"alias wins over anchor", "[[t#anchor|Display]]", "Display"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			links := Scan([]byte(tt.src))
+			if len(links) != 1 {
+				t.Fatalf("got %d links, want 1", len(links))
+			}
+			if got := links[0].PlainText(); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUnlink(t *testing.T) {
+	tests := []struct {
+		name    string
+		src     string
+		want    string
+		oldLink string
+		newText string
+	}{
+		{"basic", "see [[t]] here", "see t here", "[[t]]", "t"},
+		{"alias", "see [[t|Display]] here", "see Display here", "[[t|Display]]", "Display"},
+		{"anchor", "see [[t#anchor]] here", "see t here", "[[t#anchor]]", "t"},
+		{"anchor and alias", "see [[t#a|Display]] here", "see Display here", "[[t#a|Display]]", "Display"},
+		{"only the match", "[[t]] and [[other]]", "t and [[other]]", "[[t]]", "t"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, edits := Unlink([]byte(tt.src), func(l Link) bool { return l.Target == "t" })
+			if string(out) != tt.want {
+				t.Errorf("got %q, want %q", out, tt.want)
+			}
+			if len(edits) != 1 {
+				t.Fatalf("got %d edits, want 1: %+v", len(edits), edits)
+			}
+			if edits[0].Old != tt.oldLink || edits[0].New != tt.newText {
+				t.Errorf("edit = %+v, want Old=%q New=%q", edits[0], tt.oldLink, tt.newText)
+			}
+		})
+	}
+}
+
+func TestUnlinkSkipsCodeFence(t *testing.T) {
+	src := []byte("`[[t]]` and [[t]] outside")
+	out, edits := Unlink(src, func(l Link) bool { return l.Target == "t" })
+	want := "`[[t]]` and t outside"
+	if string(out) != want {
+		t.Errorf("got %q, want %q", out, want)
+	}
+	if len(edits) != 1 {
+		t.Errorf("got %d edits, want 1", len(edits))
+	}
+}
+
+func TestUnlinkNoMatchReturnsOriginal(t *testing.T) {
+	src := []byte("[[foo]] [[bar]]")
+	out, edits := Unlink(src, func(l Link) bool { return false })
+	if string(out) != string(src) || edits != nil {
+		t.Errorf("expected unchanged src and nil edits, got %q / %+v", out, edits)
+	}
+}

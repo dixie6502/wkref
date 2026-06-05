@@ -1,8 +1,9 @@
 # wkref
 
 A small Go CLI for the cross-file chores of a `[[wikilink]]`-based markdown
-tree: rename a file and rewrite every link to it, and check the tree for
-integrity problems. Small and opinionated.
+tree: rename a file and rewrite every link to it, delete a file and unwrap the
+links that would break, and check the tree for integrity problems. Small and
+opinionated.
 
 It operates on a tree you name explicitly (a directory), within which filenames
 are addressed by basename as `[[wikilinks]]`. It expects no marker file and is
@@ -29,7 +30,7 @@ PRs won't be answered for the moment.
 
 ## Functionality
 
-Five subcommands, all chore operations — run occasionally, no interactive part.
+Six subcommands, all chore operations — run occasionally, no interactive part.
 
 - `wkref mv <old> <new> --root <dir>` — move a file and rewrite every `[[link]]`
   whose target basename matches. Paths are given in `dir/name.md` form, like the
@@ -39,6 +40,13 @@ Five subcommands, all chore operations — run occasionally, no interactive part
   aliases are preserved (`[[old#h|Disp]]` → `[[new#h|Disp]]`). Refuses (writes
   nothing) if either operand leaves the namespace, the new name already exists,
   or the old name is ambiguous.
+- `wkref rm <file> --root <dir>` — delete a file and **unwrap** every link the
+  deletion would break, replacing the `[[…]]` span with its plain display text:
+  the alias if present, else the target (`[[t]]` → `t`, `[[t|D]]` → `D`,
+  `[[t#a|D]]` → `D`). If links would break, `rm` refuses without `--force` and
+  lists them — the refusal is the preview. When another file shares the
+  basename, links still resolve to it: the file is deleted and nothing is
+  unwrapped. `--root` is **required**, like `mv`.
 - `wkref check [--root <dir>]` — report **broken** links (no target file) and
   **collisions** (one basename, several files). These are integrity faults;
   either makes it exit `1`. `--root` defaults to the current directory.
@@ -56,7 +64,7 @@ file inside the tree.
 
 `--root` must be an existing directory; the tool does not walk up or look for a
 marker file. Read-only commands (`check`, `orphans`, `links`, `backlinks`)
-default to `.`; `mv` requires the flag.
+default to `.`; `mv` and `rm` require the flag.
 
 Output is text, one event per line. Pass/fail is the exit code, not the text.
 
@@ -64,13 +72,14 @@ Flags:
 
 | Flag | Subcommands | Purpose |
 |---|---|---|
-| `--root <dir>` | all | Tree to operate on. Defaults to `.` for read-only commands; required for `mv`. |
-| `--dry-run` | `mv` | Print the plan; change nothing on disk. |
+| `--root <dir>` | all | Tree to operate on. Defaults to `.` for read-only commands; required for `mv` and `rm`. |
+| `--dry-run` | `mv`, `rm` | Print the plan; change nothing on disk. |
+| `--force` | `rm` | Delete even when it breaks links, unlinking them. |
 
-Exit codes: `0` ok, `1` problems found (`check`) or operation refused (`mv`),
-`2` usage error, invalid root, or file operand not in the tree. `orphans`,
-`links`, and `backlinks` exit `0` whenever they run; `-h`/`--help` prints
-usage and exits `0` on every subcommand.
+Exit codes: `0` ok, `1` problems found (`check`) or operation refused (`mv`,
+unforced link-breaking `rm`), `2` usage error, invalid root, or file operand
+not in the tree. `orphans`, `links`, and `backlinks` exit `0` whenever they
+run; `-h`/`--help` prints usage and exits `0` on every subcommand.
 
 ## Usage
 
@@ -83,9 +92,13 @@ wkref orphans --root ~/notes/journal
 wkref links notes/foo.md                               # what foo.md points at
 wkref backlinks notes/foo.md --root ~/notes            # what points at foo.md
 
-# mv requires --root explicitly:
+# mv and rm require --root explicitly:
 wkref mv notes/old.md notes/new.md --root . --dry-run  # preview
 wkref mv notes/old.md notes/new.md --root .            # apply
+
+# rm refuses if links would break, listing them; --force unlinks and deletes
+wkref rm notes/old.md --root .                         # refusal = preview
+wkref rm notes/old.md --root . --force                 # delete + unwrap links
 ```
 
 `mv` takes exactly one source and one destination — no globs, no multiple

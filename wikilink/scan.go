@@ -1,5 +1,6 @@
 // Package wikilink scans markdown for [[wikilinks]] and rewrites their
-// targets, skipping contexts where [[…]] is literal rather than a link.
+// targets or unwraps them to plain text, skipping contexts where [[…]] is
+// literal rather than a link.
 package wikilink
 
 import (
@@ -41,6 +42,16 @@ func (l Link) Rewritten(newTarget string) string {
 	return l.Raw[:lo] + newTarget + l.Raw[hi:]
 }
 
+// PlainText returns the link's display text: its alias if present, else its
+// target. The anchor is dropped. This is what an [[…]] span unwraps to when
+// its target file is removed.
+func (l Link) PlainText() string {
+	if l.Alias != "" {
+		return l.Alias
+	}
+	return l.Target
+}
+
 // An Edit records one rewritten link: its position and old/new text.
 type Edit struct {
 	Line int
@@ -53,19 +64,40 @@ type Edit struct {
 // returns (target, true). It returns the new content and the edits made; when
 // nothing matched it returns src unchanged and a nil slice.
 func Rewrite(src []byte, newTarget func(Link) (string, bool)) ([]byte, []Edit) {
+	return replaceLinks(src, func(l Link) (string, bool) {
+		if nt, ok := newTarget(l); ok {
+			return l.Rewritten(nt), true
+		}
+		return "", false
+	})
+}
+
+// Unlink scans src and replaces the full [[…]] span of every link match
+// accepts with its plain display text (alias else target, anchor dropped),
+// turning the link into ordinary prose. Same return contract as Rewrite.
+func Unlink(src []byte, match func(Link) bool) ([]byte, []Edit) {
+	return replaceLinks(src, func(l Link) (string, bool) {
+		return l.PlainText(), match(l)
+	})
+}
+
+// replaceLinks scans src and, for each link the decide func accepts, replaces
+// its full Raw span with the returned text. It returns the new content and
+// the edits made; when nothing matched it returns src unchanged and a nil
+// slice.
+func replaceLinks(src []byte, decide func(Link) (string, bool)) ([]byte, []Edit) {
 	var out []byte
 	var edits []Edit
 	prev := 0
 	for _, l := range Scan(src) {
-		nt, ok := newTarget(l)
+		repl, ok := decide(l)
 		if !ok {
 			continue
 		}
-		newRaw := l.Rewritten(nt)
 		out = append(out, src[prev:l.byteStart]...)
-		out = append(out, newRaw...)
+		out = append(out, repl...)
 		prev = l.byteStart + len(l.Raw)
-		edits = append(edits, Edit{Line: l.Line, Col: l.Col, Old: l.Raw, New: newRaw})
+		edits = append(edits, Edit{Line: l.Line, Col: l.Col, Old: l.Raw, New: repl})
 	}
 	if edits == nil {
 		return src, nil

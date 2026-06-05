@@ -41,6 +41,7 @@ func TestSubcommandHelpExitsOK(t *testing.T) {
 		{"links", "-h"},
 		{"backlinks", "--help"},
 		{"mv", "-h"},
+		{"rm", "-h"},
 	} {
 		if code := run(args); code != exitOK {
 			t.Errorf("run(%v) = %d, want %d", args, code, exitOK)

@@ -1,8 +1,8 @@
 // Command wkref renames a markdown file and rewrites its [[wikilinks]] (mv),
-// reports tree integrity problems (check), lists files nothing links to
-// (orphans), and answers the per-file link queries (links, backlinks). It is a
-// pure data tool: paths and flags in, text out, an exit code. See the design
-// docs.
+// deletes a file and unwraps the links that would break (rm), reports tree
+// integrity problems (check), lists files nothing links to (orphans), and
+// answers the per-file link queries (links, backlinks). It is a pure data
+// tool: paths and flags in, text out, an exit code. See the design docs.
 package main
 
 import (
@@ -16,6 +16,7 @@ import (
 	"github.com/alxn0/wkref/mv"
 	"github.com/alxn0/wkref/orphans"
 	"github.com/alxn0/wkref/output"
+	"github.com/alxn0/wkref/rm"
 	"github.com/alxn0/wkref/tree"
 )
 
@@ -40,6 +41,8 @@ func run(args []string) int {
 	switch args[0] {
 	case "mv":
 		return runMV(args[1:])
+	case "rm":
+		return runRM(args[1:])
 	case "check":
 		return runCheck(args[1:])
 	case "orphans":
@@ -83,6 +86,35 @@ func runMV(args []string) int {
 		return exitDirty
 	}
 	output.MV(os.Stdout, result)
+	return exitOK
+}
+
+func runRM(args []string) int {
+	fs := newFlagSet("rm", "usage: wkref rm <file> --root <dir> [--dry-run] [--force]")
+	dryRun := fs.Bool("dry-run", false, "compute the plan without writing")
+	force := fs.Bool("force", false, "delete even when it breaks links, unlinking them")
+	// No default: rm destroys, so the scope must be stated explicitly.
+	root := fs.String("root", "", "tree root (required)")
+	operands, err := parseFlags(fs, args)
+	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return exitOK
+		}
+		return exitUsage
+	}
+	if len(operands) != 1 || *root == "" {
+		fs.Usage()
+		return exitUsage
+	}
+	result, err := rm.Run(*root, operands[0], *dryRun, *force)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "wkref: %v\n", err)
+		if errors.Is(err, tree.ErrInvalidRoot) {
+			return exitUsage
+		}
+		return exitDirty
+	}
+	output.RM(os.Stdout, result)
 	return exitOK
 }
 
@@ -228,10 +260,11 @@ func parseFlags(fs *flag.FlagSet, args []string) ([]string, error) {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `wkref — wikilink rename and integrity check
+	fmt.Fprint(os.Stderr, `wkref — wikilink rename, delete, and integrity check
 
 usage:
   wkref mv <old> <new> --root <dir> [--dry-run]
+  wkref rm <file> --root <dir> [--dry-run] [--force]
   wkref check [--root <dir>]              (root defaults to .)
   wkref orphans [--root <dir>]            (root defaults to .)
   wkref links <file> [--root <dir>]       (root defaults to .)
