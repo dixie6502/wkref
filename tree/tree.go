@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -75,7 +76,7 @@ func load(root string) (*Tree, error) {
 		}
 		rel = filepath.ToSlash(rel)
 		tr.Files = append(tr.Files, rel)
-		base := strings.TrimSuffix(d.Name(), ".md")
+		base := Basename(rel)
 		tr.Index[base] = append(tr.Index[base], rel)
 		return nil
 	})
@@ -117,6 +118,32 @@ func (tr *Tree) Contains(abs string) bool {
 		return false
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// ResolveFile maps a file operand (dir/name.md form, as for mv) to its
+// root-relative path. The operand must lie inside the tree and name one of its
+// enumerated markdown files; anything else — missing, excluded, not .md — is
+// an error.
+func (tr *Tree) ResolveFile(file string) (string, error) {
+	abs, err := filepath.Abs(file)
+	if err != nil {
+		return "", err
+	}
+	if !tr.Contains(abs) {
+		return "", fmt.Errorf("file %s is outside root %s", file, tr.Root)
+	}
+	rel := tr.Rel(abs)
+	if !slices.Contains(tr.Files, rel) {
+		return "", fmt.Errorf("file not in tree: %s", file)
+	}
+	return rel, nil
+}
+
+// Basename returns the wikilink basename of a markdown file path: the final
+// path element without its ".md" suffix. This is the name a [[wikilink]]
+// resolves by.
+func Basename(path string) string {
+	return strings.TrimSuffix(filepath.Base(path), ".md")
 }
 
 func isExcludedName(name string) bool {

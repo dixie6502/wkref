@@ -1,7 +1,8 @@
 // Command wkref renames a markdown file and rewrites its [[wikilinks]] (mv),
-// reports tree integrity problems (check), and lists files nothing links to
-// (orphans). It is a pure data tool: paths and flags in, text out, an exit
-// code. See the design docs.
+// reports tree integrity problems (check), lists files nothing links to
+// (orphans), and answers the per-file link queries (links, backlinks). It is a
+// pure data tool: paths and flags in, text out, an exit code. See the design
+// docs.
 package main
 
 import (
@@ -11,15 +12,16 @@ import (
 	"os"
 
 	"github.com/alxn0/wkref/check"
+	"github.com/alxn0/wkref/links"
 	"github.com/alxn0/wkref/mv"
 	"github.com/alxn0/wkref/orphans"
 	"github.com/alxn0/wkref/output"
 	"github.com/alxn0/wkref/tree"
 )
 
-// Exit codes. For check: 0 clean, 1 broken/collisions present. orphans always
-// exits 0 on success (it lists, it does not judge). For all: 2 on usage error
-// or an invalid root.
+// Exit codes. For check: 0 clean, 1 broken/collisions present. orphans, links,
+// and backlinks always exit 0 on success (they list, they do not judge). For
+// all: 2 on usage error or an invalid root.
 const (
 	exitOK    = 0
 	exitDirty = 1
@@ -42,6 +44,10 @@ func run(args []string) int {
 		return runCheck(args[1:])
 	case "orphans":
 		return runOrphans(args[1:])
+	case "links":
+		return runLinks(args[1:])
+	case "backlinks":
+		return runBacklinks(args[1:])
 	case "-h", "--help", "help":
 		usage()
 		return exitOK
@@ -78,7 +84,7 @@ func runMV(args []string) int {
 }
 
 func runCheck(args []string) int {
-	tr, code := resolveReadOnly("check", args)
+	tr, _, code := resolveReadOnly("check", "", 0, args)
 	if tr == nil {
 		return code
 	}
@@ -95,7 +101,7 @@ func runCheck(args []string) int {
 }
 
 func runOrphans(args []string) int {
-	tr, code := resolveReadOnly("orphans", args)
+	tr, _, code := resolveReadOnly("orphans", "", 0, args)
 	if tr == nil {
 		return code
 	}
@@ -108,27 +114,72 @@ func runOrphans(args []string) int {
 	return exitOK
 }
 
+func runLinks(args []string) int {
+	tr, rel, code := resolveQueryFile("links", args)
+	if tr == nil {
+		return code
+	}
+	forward, err := links.Forward(tr, rel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "wkref: %v\n", err)
+		return exitDirty
+	}
+	output.Links(os.Stdout, forward)
+	return exitOK
+}
+
+func runBacklinks(args []string) int {
+	tr, rel, code := resolveQueryFile("backlinks", args)
+	if tr == nil {
+		return code
+	}
+	backward, err := links.Backward(tr, rel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "wkref: %v\n", err)
+		return exitDirty
+	}
+	output.Backlinks(os.Stdout, backward)
+	return exitOK
+}
+
+// resolveQueryFile parses a per-file query subcommand (links, backlinks) and
+// resolves its single file operand to a root-relative path. Same contract as
+// resolveReadOnly: a nil tree means stop with the returned exit code.
+func resolveQueryFile(name string, args []string) (*tree.Tree, string, int) {
+	tr, operands, code := resolveReadOnly(name, " <file>", 1, args)
+	if tr == nil {
+		return nil, "", code
+	}
+	rel, err := tr.ResolveFile(operands[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "wkref: %v\n", err)
+		return nil, "", exitUsage
+	}
+	return tr, rel, exitOK
+}
+
 // resolveReadOnly parses a read-only subcommand whose only flag is --root
-// (default "."), rejects positional operands, and resolves the tree. On any
-// error it prints a message and returns a nil tree with the exit code to use;
-// otherwise it returns the tree and exitOK.
-func resolveReadOnly(name string, args []string) (*tree.Tree, int) {
+// (default "."), enforces the exact operand count (operandSpec names them in
+// the usage line), and resolves the tree. On any error it prints a message and
+// returns a nil tree with the exit code to use; otherwise it returns the tree,
+// the operands, and exitOK.
+func resolveReadOnly(name, operandSpec string, want int, args []string) (*tree.Tree, []string, int) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	root := fs.String("root", ".", "tree root")
 	operands, err := parseFlags(fs, args)
 	if err != nil {
-		return nil, exitUsage
+		return nil, nil, exitUsage
 	}
-	if len(operands) != 0 {
-		fmt.Fprintf(os.Stderr, "usage: wkref %s [--root <dir>]\n", name)
-		return nil, exitUsage
+	if len(operands) != want {
+		fmt.Fprintf(os.Stderr, "usage: wkref %s%s [--root <dir>]\n", name, operandSpec)
+		return nil, nil, exitUsage
 	}
 	tr, err := tree.Resolve(*root)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "wkref: %v\n", err)
-		return nil, exitUsage
+		return nil, nil, exitUsage
 	}
-	return tr, exitOK
+	return tr, operands, exitOK
 }
 
 // parseFlags parses fs allowing flags and positional operands to interleave,
@@ -163,7 +214,9 @@ func usage() {
 
 usage:
   wkref mv <old> <new> --root <dir> [--dry-run]
-  wkref check [--root <dir>]      (root defaults to .)
-  wkref orphans [--root <dir>]    (root defaults to .)
+  wkref check [--root <dir>]              (root defaults to .)
+  wkref orphans [--root <dir>]            (root defaults to .)
+  wkref links <file> [--root <dir>]       (root defaults to .)
+  wkref backlinks <file> [--root <dir>]   (root defaults to .)
 `)
 }

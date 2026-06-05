@@ -29,7 +29,7 @@ PRs won't be answered for the moment.
 
 ## Functionality
 
-Three subcommands, all chore operations — run occasionally, no interactive part.
+Five subcommands, all chore operations — run occasionally, no interactive part.
 
 - `wkref mv <old> <new> --root <dir>` — move a file and rewrite every `[[link]]`
   whose target basename matches. Paths are given in `dir/name.md` form, like the
@@ -43,10 +43,18 @@ Three subcommands, all chore operations — run occasionally, no interactive par
 - `wkref orphans [--root <dir>]` — list files with **no incoming link**. A
   discoverability aid, not an integrity test: it lists, it does not fail, and
   always exits `0`. `--root` defaults to the current directory.
+- `wkref links <file> [--root <dir>]` — list the **outgoing** links of `<file>`,
+  each resolved to the file(s) its basename matches, or `(broken)`. Like
+  `orphans`, a discoverability aid: always exits `0`.
+- `wkref backlinks <file> [--root <dir>]` — list every link **pointing at**
+  `<file>`'s basename, as `file:line` occurrences. Always exits `0`.
+
+`<file>` is given in `dir/name.md` form, like `mv`'s operands, and must name a
+file inside the tree.
 
 `--root` must be an existing directory; the tool does not walk up or look for a
-marker file. Read-only commands (`check`, `orphans`) default to `.`; `mv`
-requires the flag.
+marker file. Read-only commands (`check`, `orphans`, `links`, `backlinks`)
+default to `.`; `mv` requires the flag.
 
 Output is text, one event per line. Pass/fail is the exit code, not the text.
 
@@ -54,18 +62,23 @@ Flags:
 
 | Flag | Subcommands | Purpose |
 |---|---|---|
-| `--root <dir>` | all | Tree to operate on. Defaults to `.` for `check`/`orphans`; required for `mv`. |
+| `--root <dir>` | all | Tree to operate on. Defaults to `.` for read-only commands; required for `mv`. |
 | `--dry-run` | `mv` | Print the plan; change nothing on disk. |
 
 Exit codes: `0` ok, `1` problems found (`check`) or operation refused (`mv`),
-`2` usage error or invalid root. `orphans` exits `0` whenever it runs.
+`2` usage error, invalid root, or file operand not in the tree. `orphans`,
+`links`, and `backlinks` exit `0` whenever they run.
 
 ## Usage
 
 ```sh
-# check/orphans default to the current directory:
+# read-only commands default to the current directory:
 wkref check                                            # check .
 wkref orphans --root ~/notes/journal
+
+# per-file queries: outgoing and incoming links
+wkref links notes/foo.md                               # what foo.md points at
+wkref backlinks notes/foo.md --root ~/notes            # what points at foo.md
 
 # mv requires --root explicitly:
 wkref mv notes/old.md notes/new.md --root . --dry-run  # preview

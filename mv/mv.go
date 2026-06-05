@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/alxn0/wkref/tree"
 	"github.com/alxn0/wkref/wikilink"
@@ -70,8 +69,8 @@ func Run(root, oldPath, newPath string, dryRun bool) (*Result, error) {
 		return nil, fmt.Errorf("destination already exists: %s", newPath)
 	}
 
-	oldBase := basename(oldAbs)
-	newBase := basename(newAbs)
+	oldBase := tree.Basename(oldAbs)
+	newBase := tree.Basename(newAbs)
 
 	if len(tr.Index[oldBase]) > 1 {
 		return nil, fmt.Errorf("ambiguous: %d files named %q in tree; resolve by hand", len(tr.Index[oldBase]), oldBase)
@@ -153,10 +152,6 @@ func remapSelfLinks(reps []Replacement, oldRel, newRel string) {
 			reps[i].File = newRel
 		}
 	}
-}
-
-func basename(path string) string {
-	return strings.TrimSuffix(filepath.Base(path), ".md")
 }
 
 func fileExists(path string) bool {

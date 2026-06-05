@@ -1,6 +1,5 @@
-// Package output renders mv, check, and orphans results as text: one event per
-// line, for direct terminal use. Pass/fail is carried by the exit code, not the
-// text.
+// Package output renders subcommand results as text: one event per line, for
+// direct terminal use. Pass/fail is carried by the exit code, not the text.
 package output
 
 import (
@@ -9,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/alxn0/wkref/check"
+	"github.com/alxn0/wkref/links"
 	"github.com/alxn0/wkref/mv"
 	"github.com/alxn0/wkref/orphans"
 )
@@ -38,5 +38,24 @@ func Check(w io.Writer, r *check.Result) {
 func Orphans(w io.Writer, r *orphans.Result) {
 	for _, o := range r.Orphans {
 		fmt.Fprintf(w, "orphan: %s\n", o)
+	}
+}
+
+// Links writes one line per outgoing link of the queried file, with its
+// basename resolution: the matching files, or "(broken)" when none match.
+func Links(w io.Writer, forward []links.ForwardLink) {
+	for _, l := range forward {
+		dest := "(broken)"
+		if len(l.Paths) > 0 {
+			dest = strings.Join(l.Paths, ", ")
+		}
+		fmt.Fprintf(w, "link: %s:%d [[%s]] -> %s\n", l.File, l.Line, l.Target, dest)
+	}
+}
+
+// Backlinks writes one line per link pointing at the queried file's basename.
+func Backlinks(w io.Writer, backward []links.Backlink) {
+	for _, b := range backward {
+		fmt.Fprintf(w, "backlink: %s:%d [[%s]]\n", b.File, b.Line, b.Target)
 	}
 }

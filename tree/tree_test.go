@@ -99,6 +99,46 @@ func TestLoadIndexesCollisions(t *testing.T) {
 	}
 }
 
+func TestResolveFile(t *testing.T) {
+	root := build(t, map[string]string{
+		"a.md":            "x",
+		"sub/b.md":        "y",
+		"_templates/t.md": "excluded",
+	})
+	tr, err := Resolve(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rel, err := tr.ResolveFile(filepath.Join(tr.Root, "sub", "b.md"))
+	if err != nil || rel != "sub/b.md" {
+		t.Errorf("ResolveFile = %q, %v; want sub/b.md, nil", rel, err)
+	}
+
+	for name, path := range map[string]string{
+		"missing":  filepath.Join(tr.Root, "nope.md"),
+		"excluded": filepath.Join(tr.Root, "_templates", "t.md"),
+		"outside":  filepath.Join(os.TempDir(), "outside.md"),
+	} {
+		if _, err := tr.ResolveFile(path); err == nil {
+			t.Errorf("ResolveFile(%s) succeeded, want error", name)
+		}
+	}
+}
+
+func TestBasename(t *testing.T) {
+	cases := map[string]string{
+		"foo.md":     "foo",
+		"sub/bar.md": "bar",
+		"noext":      "noext",
+	}
+	for path, want := range cases {
+		if got := Basename(path); got != want {
+			t.Errorf("Basename(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
 func TestContains(t *testing.T) {
 	root := build(t, map[string]string{"a/foo.md": "x"})
 	tr, err := Resolve(root)
