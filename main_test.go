@@ -32,6 +32,22 @@ func TestParseFlagsInterspersed(t *testing.T) {
 	}
 }
 
+// Asking for help is not a usage error: -h/--help on any subcommand prints
+// usage and exits 0, matching the top-level -h.
+func TestSubcommandHelpExitsOK(t *testing.T) {
+	for _, args := range [][]string{
+		{"check", "-h"},
+		{"orphans", "--help"},
+		{"links", "-h"},
+		{"backlinks", "--help"},
+		{"mv", "-h"},
+	} {
+		if code := run(args); code != exitOK {
+			t.Errorf("run(%v) = %d, want %d", args, code, exitOK)
+		}
+	}
+}
+
 // A "--" terminator must protect later operands that look like flags, so a file
 // literally named "--dry-run" can still be passed.
 func TestParseFlagsDoubleDash(t *testing.T) {

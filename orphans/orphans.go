@@ -4,7 +4,6 @@
 package orphans
 
 import (
-	"os"
 	"sort"
 
 	"github.com/alxn0/wkref/tree"
@@ -19,17 +18,16 @@ type Result struct {
 // Run scans every file's wikilinks and returns the files no link targets.
 func Run(tr *tree.Tree) (*Result, error) {
 	referenced := map[string]bool{}
-	for _, file := range tr.Files {
-		src, err := os.ReadFile(tr.Abs(file))
-		if err != nil {
-			return nil, err
-		}
+	err := tr.EachFile(func(_ string, src []byte) error {
 		for _, link := range wikilink.Scan(src) {
-			if link.Target == "" {
-				continue // intra-file anchor, not a cross-file reference
+			if link.CrossFile() {
+				referenced[link.Target] = true
 			}
-			referenced[link.Target] = true
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	result := &Result{Orphans: []string{}}

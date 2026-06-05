@@ -95,8 +95,11 @@ func (tr *Tree) Abs(rel string) string {
 	return filepath.Join(tr.Root, filepath.FromSlash(rel))
 }
 
-// Rel returns the root-relative slash path of abs, the inverse of Abs. If abs
-// is not under the root the original path is returned unchanged.
+// Rel returns the root-relative slash path of abs, the inverse of Abs. For a
+// path outside the root this yields a "../…"-prefixed result, since
+// filepath.Rel rarely fails for two absolute paths — callers must gate with
+// Contains first. Only when filepath.Rel itself errors (e.g. different
+// Windows volumes) is abs returned unchanged.
 func (tr *Tree) Rel(abs string) string {
 	r, err := filepath.Rel(tr.Root, abs)
 	if err != nil {
@@ -105,25 +108,41 @@ func (tr *Tree) Rel(abs string) string {
 	return filepath.ToSlash(r)
 }
 
-// Contains reports whether abs lies inside the tree's root. The destination of
-// an mv may not exist yet, so a path that cannot be symlink-evaluated falls
-// back to a lexical clean rather than failing.
+// Contains reports whether abs lies physically inside the tree's root.
+// Symlinks are resolved through the longest existing prefix of the path, so a
+// destination that does not exist yet is checked against the directory it
+// would really land in — a symlinked subdirectory cannot smuggle a write
+// outside the root.
 func (tr *Tree) Contains(abs string) bool {
-	clean, err := filepath.EvalSymlinks(abs)
-	if err != nil {
-		clean = filepath.Clean(abs)
-	}
-	rel, err := filepath.Rel(tr.Root, clean)
+	rel, err := filepath.Rel(tr.Root, resolveExistingPrefix(abs))
 	if err != nil {
 		return false
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// ResolveFile maps a file operand (dir/name.md form, as for mv) to its
-// root-relative path. The operand must lie inside the tree and name one of its
-// enumerated markdown files; anything else — missing, excluded, not .md — is
-// an error.
+// resolveExistingPrefix resolves symlinks in the longest existing prefix of
+// abs and rejoins the not-yet-existing remainder lexically. A path with no
+// existing ancestor at all is just cleaned.
+func resolveExistingPrefix(abs string) string {
+	current, suffix := abs, ""
+	for {
+		clean, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			return filepath.Join(clean, suffix)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return filepath.Clean(abs)
+		}
+		suffix = filepath.Join(filepath.Base(current), suffix)
+		current = parent
+	}
+}
+
+// ResolveFile maps a file operand (dir/name.md form) to its root-relative
+// path. The operand must lie inside the tree and name one of its enumerated
+// markdown files; anything else — missing, excluded, not .md — is an error.
 func (tr *Tree) ResolveFile(file string) (string, error) {
 	abs, err := filepath.Abs(file)
 	if err != nil {
@@ -132,11 +151,58 @@ func (tr *Tree) ResolveFile(file string) (string, error) {
 	if !tr.Contains(abs) {
 		return "", fmt.Errorf("file %s is outside root %s", file, tr.Root)
 	}
-	rel := tr.Rel(abs)
+	rel := tr.Rel(resolveExistingPrefix(abs))
 	if !slices.Contains(tr.Files, rel) {
 		return "", fmt.Errorf("file not in tree: %s", file)
 	}
 	return rel, nil
+}
+
+// ResolveNewFile maps a file operand that need not exist yet (an mv
+// destination) to its root-relative path. The path must lie inside the tree
+// with symlinks resolved, name a ".md" file outside the excluded directories,
+// and not be taken on disk already.
+func (tr *Tree) ResolveNewFile(file string) (string, error) {
+	abs, err := filepath.Abs(file)
+	if err != nil {
+		return "", err
+	}
+	res := resolveExistingPrefix(abs)
+	if !tr.Contains(res) {
+		return "", fmt.Errorf("file %s is outside root %s", file, tr.Root)
+	}
+	rel := tr.Rel(res)
+	if !strings.HasSuffix(rel, ".md") {
+		return "", fmt.Errorf("not a .md file: %s", file)
+	}
+	parts := strings.Split(rel, "/")
+	for _, dir := range parts[:len(parts)-1] {
+		if isExcludedName(dir) {
+			return "", fmt.Errorf("%s is under excluded directory %q", file, dir)
+		}
+	}
+	if fi, err := os.Stat(res); err == nil {
+		if fi.IsDir() {
+			return "", fmt.Errorf("%s is a directory", file)
+		}
+		return "", fmt.Errorf("already exists: %s", file)
+	}
+	return rel, nil
+}
+
+// EachFile reads every tree file in sorted order and hands its root-relative
+// path and content to fn, stopping at the first error.
+func (tr *Tree) EachFile(fn func(rel string, src []byte) error) error {
+	for _, file := range tr.Files {
+		src, err := os.ReadFile(tr.Abs(file))
+		if err != nil {
+			return err
+		}
+		if err := fn(file, src); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Basename returns the wikilink basename of a markdown file path: the final

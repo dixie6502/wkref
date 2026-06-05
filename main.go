@@ -59,16 +59,19 @@ func run(args []string) int {
 }
 
 func runMV(args []string) int {
-	fs := flag.NewFlagSet("mv", flag.ContinueOnError)
+	fs := newFlagSet("mv", "usage: wkref mv <old> <new> --root <dir> [--dry-run]")
 	dryRun := fs.Bool("dry-run", false, "compute the plan without writing")
 	// No default: mv destroys, so the scope must be stated explicitly.
 	root := fs.String("root", "", "tree root (required)")
 	operands, err := parseFlags(fs, args)
 	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return exitOK
+		}
 		return exitUsage
 	}
 	if len(operands) != 2 || *root == "" {
-		fmt.Fprintln(os.Stderr, "usage: wkref mv <old> <new> --root <dir> [--dry-run]")
+		fs.Usage()
 		return exitUsage
 	}
 	result, err := mv.Run(*root, operands[0], operands[1], *dryRun)
@@ -161,17 +164,20 @@ func resolveQueryFile(name string, args []string) (*tree.Tree, string, int) {
 // resolveReadOnly parses a read-only subcommand whose only flag is --root
 // (default "."), enforces the exact operand count (operandSpec names them in
 // the usage line), and resolves the tree. On any error it prints a message and
-// returns a nil tree with the exit code to use; otherwise it returns the tree,
-// the operands, and exitOK.
+// returns a nil tree with the exit code to use — exitOK when the user asked
+// for help; otherwise it returns the tree, the operands, and exitOK.
 func resolveReadOnly(name, operandSpec string, want int, args []string) (*tree.Tree, []string, int) {
-	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs := newFlagSet(name, fmt.Sprintf("usage: wkref %s%s [--root <dir>]", name, operandSpec))
 	root := fs.String("root", ".", "tree root")
 	operands, err := parseFlags(fs, args)
 	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil, nil, exitOK
+		}
 		return nil, nil, exitUsage
 	}
 	if len(operands) != want {
-		fmt.Fprintf(os.Stderr, "usage: wkref %s%s [--root <dir>]\n", name, operandSpec)
+		fs.Usage()
 		return nil, nil, exitUsage
 	}
 	tr, err := tree.Resolve(*root)
@@ -180,6 +186,18 @@ func resolveReadOnly(name, operandSpec string, want int, args []string) (*tree.T
 		return nil, nil, exitUsage
 	}
 	return tr, operands, exitOK
+}
+
+// newFlagSet builds a subcommand FlagSet whose usage output is the wkref
+// synopsis line plus the flag defaults, replacing the stdlib's bare flag dump.
+// -h/--help reaches the caller as flag.ErrHelp, to be answered with exit 0.
+func newFlagSet(name, usageLine string) *flag.FlagSet {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, usageLine)
+		fs.PrintDefaults()
+	}
+	return fs
 }
 
 // parseFlags parses fs allowing flags and positional operands to interleave,

@@ -3,6 +3,7 @@
 package wikilink
 
 import (
+	"bytes"
 	"sort"
 
 	"github.com/yuin/goldmark"
@@ -24,6 +25,12 @@ type Link struct {
 	byteStart   int // offset of the leading "[["
 	targetStart int // offset of the trimmed target within source
 	targetEnd   int
+}
+
+// CrossFile reports whether the link addresses another file rather than an
+// intra-file anchor like [[#section]].
+func (l Link) CrossFile() bool {
+	return l.Target != ""
 }
 
 // Rewritten returns the Raw link with only its target portion replaced by
@@ -68,15 +75,15 @@ func Rewrite(src []byte, newTarget func(Link) (string, bool)) ([]byte, []Edit) {
 }
 
 // Scan returns every [[wikilink]] in src that is an actual link — matches
-// inside code fences, indented code, inline code, HTML, or escaped with a
-// leading backslash are excluded.
+// inside code fences, indented code, inline code, HTML, YAML frontmatter, or
+// escaped with a backslash are excluded.
 func Scan(src []byte) []Link {
 	skips := skipRanges(src)
 	lineStarts := lineStartOffsets(src)
 	var links []Link
 	for _, m := range findLinkSpans(src) {
 		start, end := m[0], m[1]
-		if start > 0 && src[start-1] == '\\' {
+		if escaped(src, start) {
 			continue
 		}
 		if inAnySpan(start, skips) {
@@ -85,6 +92,18 @@ func Scan(src []byte) []Link {
 		links = append(links, parseLink(src, start, end, lineStarts))
 	}
 	return links
+}
+
+// escaped reports whether the "[[" at start is suppressed by a backslash. An
+// odd run of preceding backslashes escapes the bracket; an even run is
+// escaped backslashes followed by a live link (CommonMark: `\\` is a literal
+// backslash).
+func escaped(src []byte, start int) bool {
+	run := 0
+	for p := start - 1; p >= 0 && src[p] == '\\'; p-- {
+		run++
+	}
+	return run%2 == 1
 }
 
 // parseLink dissects one "[[…]]" span into target, anchor, and alias.
@@ -150,12 +169,18 @@ func findLinkSpans(src []byte) [][2]int {
 // span is a half-open byte range [start, stop) to skip during scanning.
 type span struct{ start, stop int }
 
-// skipRanges parses src with goldmark and collects the byte ranges of nodes
-// where bracket text is literal: fenced and indented code blocks, inline
-// code spans, and raw HTML (block and inline).
+// skipRanges parses src with goldmark and collects the byte ranges where
+// bracket text is literal: YAML frontmatter, fenced and indented code blocks
+// (including the opening fence's info string), inline code spans, and raw
+// HTML (block and inline, including the block's closure line). Known
+// limitation: [[…]] inside an inline markdown-link destination or autolink is
+// not excluded — goldmark records no source span for those.
 func skipRanges(src []byte) []span {
-	doc := goldmark.DefaultParser().Parse(text.NewReader(src))
 	var spans []span
+	if fm, ok := frontmatterSpan(src); ok {
+		spans = append(spans, fm)
+	}
+	doc := goldmark.DefaultParser().Parse(text.NewReader(src))
 	addSegments := func(segs *text.Segments) {
 		for i := 0; i < segs.Len(); i++ {
 			s := segs.At(i)
@@ -168,11 +193,17 @@ func skipRanges(src []byte) []span {
 		}
 		switch v := n.(type) {
 		case *ast.FencedCodeBlock:
+			if v.Info != nil {
+				spans = append(spans, span{v.Info.Segment.Start, v.Info.Segment.Stop})
+			}
 			addSegments(v.Lines())
 		case *ast.CodeBlock:
 			addSegments(v.Lines())
 		case *ast.HTMLBlock:
 			addSegments(v.Lines())
+			if v.HasClosure() {
+				spans = append(spans, span{v.ClosureLine.Start, v.ClosureLine.Stop})
+			}
 		case *ast.RawHTML:
 			addSegments(v.Segments)
 		case *ast.CodeSpan:
@@ -185,6 +216,40 @@ func skipRanges(src []byte) []span {
 		return ast.WalkContinue, nil
 	})
 	return spans
+}
+
+// frontmatterSpan returns the byte span of a leading YAML frontmatter block:
+// an opening "---" line at the very top of the file, closed by a "---" or
+// "..." line. Without a closing line the opener is ordinary markdown (a
+// thematic break), not frontmatter.
+func frontmatterSpan(src []byte) (span, bool) {
+	line, next := lineAt(src, 0)
+	if !bytes.Equal(bytes.TrimSuffix(line, []byte("\r")), []byte("---")) {
+		return span{}, false
+	}
+	for pos := next; pos < len(src); {
+		line, next = lineAt(src, pos)
+		t := bytes.TrimSuffix(line, []byte("\r"))
+		if bytes.Equal(t, []byte("---")) || bytes.Equal(t, []byte("...")) {
+			return span{0, next}, true
+		}
+		pos = next
+	}
+	return span{}, false
+}
+
+// lineAt returns the line starting at pos (without its newline) and the
+// offset just past the line terminator.
+func lineAt(src []byte, pos int) ([]byte, int) {
+	i := pos
+	for i < len(src) && src[i] != '\n' {
+		i++
+	}
+	line := src[pos:i]
+	if i < len(src) {
+		i++ // consume the newline
+	}
+	return line, i
 }
 
 // inAnySpan reports whether pos falls inside any skip range.

@@ -35,7 +35,9 @@ No external markdown-link library — wikilink syntax is too small and specific 
 
 **`wkref mv <old> <new> --root <dir>`** moves the file and rewrites every `[[…]]` whose target basename matches `<old>`'s basename, replacing only the target portion. Anchors and aliases are preserved.
 
-**`--root` is required for `mv`.** `mv` is the one destructive command, so its scope is never inferred from the current directory. The read-only commands default `--root` to `.`. Both `<old>` and `<new>` must resolve inside `--root`; a path escaping it is refused. Rejected: a positional `<root>` operand (breaks the familiar `mv <old> <new>` shape) and a shared default for `mv` (a typo'd cwd would silently rewrite the wrong tree).
+**`--root` is required for `mv`.** `mv` is the one destructive command, so its scope is never inferred from the current directory. The read-only commands default `--root` to `.`. Rejected: a positional `<root>` operand (breaks the familiar `mv <old> <new>` shape) and a shared default for `mv` (a typo'd cwd would silently rewrite the wrong tree).
+
+**Both operands must stay in the tree's namespace.** The source must be an enumerated tree file (the same resolution `links`/`backlinks` use); the destination must be a fresh `.md` path inside `--root` and outside the excluded `_`/`.` directories, and may not be an existing file or directory. Containment is checked against where the path *physically* lands — symlinks are resolved through the longest existing prefix — so a symlinked subdirectory cannot smuggle a write outside the root. Each rule closes a corruption path found in review: an excluded-dir source would rewrite links belonging to an enumerated file sharing its basename; a non-`.md` or excluded-dir destination would move the file out of the namespace while rewriting every link to a name that can no longer resolve.
 
 **Basename, not path.** Matches the resolution model: `[[foo]]` resolves by basename, so rewrites match by basename. Same file moved between folders without renaming: zero rewrites needed (links still resolve). Filename actually changed: every reference updated.
 
@@ -93,14 +95,15 @@ Lets `wkref check` slot into git pre-commit hooks or cron without further plumbi
 
 **Skipped contexts** (where `[[…]]` is literal, not a link):
 
-- Fenced code blocks (``` ``` ``` ``` and `~~~`)
+- Fenced code blocks (``` ``` ``` ``` and `~~~`), including the opening fence's info string
 - Indented code blocks (4+ spaces)
 - Inline code spans (`` `…` ``)
-- HTML blocks (best-effort; if it looks like raw HTML, skip)
+- HTML blocks (best-effort; if it looks like raw HTML, skip), including the closing line goldmark stores separately
+- YAML frontmatter (a leading `---` line closed by `---` or `...`; without a closer the opener is ordinary markdown)
 
-Goldmark's AST traversal gives the first three for free. HTML handling is heuristic; documented as such.
+Goldmark's AST traversal gives the code contexts for free; frontmatter is detected by hand because the default parser has no frontmatter extension. HTML handling is heuristic; documented as such. **Known limitation:** `[[…]]` inside an inline markdown-link destination (`[t](url#[[x]])`) or autolink (`<https://…[[x]]>`) is still scanned — goldmark records no source span for those, and brackets are invalid in URLs anyway.
 
-**Escapes:** `\[\[foo\]\]` is left alone. Pragmatic — rare in practice, but cheap to honor.
+**Escapes:** an odd run of backslashes before `[[` escapes the link (`\[[foo]]`, `\[\[foo\]\]`); an even run is escaped backslashes followed by a live link (`\\[[foo]]`), matching CommonMark.
 
 ## Root resolution
 
@@ -123,7 +126,7 @@ Goldmark's AST traversal gives the first three for free. HTML handling is heuris
 | `--root <dir>` | all | Tree to operate on. Default `.` for read-only commands; required for `mv`. |
 | `--dry-run` | `mv` | Plan without writing |
 
-No `--format`, no `--exclude`, no `--verbose`, no `--config`. Output is text only. Add only when forced by real friction.
+No `--format`, no `--exclude`, no `--verbose`, no `--config`. Output is text only. Add only when forced by real friction. `-h`/`--help` on any subcommand prints its usage synopsis and exits `0` — asking for help is not a usage error.
 
 ## File layout
 

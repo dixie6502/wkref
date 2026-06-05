@@ -33,10 +33,12 @@ Five subcommands, all chore operations — run occasionally, no interactive part
 
 - `wkref mv <old> <new> --root <dir>` — move a file and rewrite every `[[link]]`
   whose target basename matches. Paths are given in `dir/name.md` form, like the
-  real `mv`; both must resolve inside `--root`. `--root` is **required** — `mv`
-  destroys, so its scope is never inferred. Anchors and aliases are preserved
-  (`[[old#h|Disp]]` → `[[new#h|Disp]]`). Refuses (writes nothing) if the new name
-  already exists or the old name is ambiguous.
+  real `mv`; both must name `.md` files in the tree's namespace: inside `--root`
+  (symlinks resolved) and not under an excluded `_`/`.` directory. `--root` is
+  **required** — `mv` destroys, so its scope is never inferred. Anchors and
+  aliases are preserved (`[[old#h|Disp]]` → `[[new#h|Disp]]`). Refuses (writes
+  nothing) if either operand leaves the namespace, the new name already exists,
+  or the old name is ambiguous.
 - `wkref check [--root <dir>]` — report **broken** links (no target file) and
   **collisions** (one basename, several files). These are integrity faults;
   either makes it exit `1`. `--root` defaults to the current directory.
@@ -67,7 +69,8 @@ Flags:
 
 Exit codes: `0` ok, `1` problems found (`check`) or operation refused (`mv`),
 `2` usage error, invalid root, or file operand not in the tree. `orphans`,
-`links`, and `backlinks` exit `0` whenever they run.
+`links`, and `backlinks` exit `0` whenever they run; `-h`/`--help` prints
+usage and exits `0` on every subcommand.
 
 ## Usage
 

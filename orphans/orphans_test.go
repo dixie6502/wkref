@@ -1,31 +1,16 @@
 package orphans
 
 import (
-	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/alxn0/wkref/tree"
+	"github.com/alxn0/wkref/tree/treetest"
 )
 
 func load(t *testing.T, files map[string]string) *tree.Tree {
 	t.Helper()
-	root := t.TempDir()
-	for path, content := range files {
-		full := filepath.Join(root, filepath.FromSlash(path))
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	tr, err := tree.Resolve(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return tr
+	return treetest.Load(t, files)
 }
 
 func TestOrphans(t *testing.T) {

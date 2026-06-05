@@ -47,15 +47,43 @@ func TestScanSkipsLiteralContexts(t *testing.T) {
 	}{
 		{"fenced backtick", "```\n[[foo]]\n```\n"},
 		{"fenced tilde", "~~~\n[[foo]]\n~~~\n"},
+		{"fence info string", "```go [[foo]]\ncode\n```\n"},
+		{"tilde info string", "~~~go [[foo]]\ncode\n~~~\n"},
 		{"indented code", "text\n\n    [[foo]]\n"},
 		{"inline code", "use `[[foo]]` literally"},
 		{"escaped", `\[[foo]]`},
+		{"escaped, odd backslash run", `\\\[[foo]]`},
 		{"html block", "<div>\n[[foo]]\n</div>\n"},
+		{"html closure line", "<script>\nvar x;\n[[foo]]</script>\n"},
+		{"html comment closure", "<!--\ncomment\n[[foo]]-->\n"},
+		{"frontmatter", "---\nup: [[foo]]\n---\nbody\n"},
+		{"frontmatter dots close", "---\nup: [[foo]]\n...\nbody\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if links := Scan([]byte(tt.src)); len(links) != 0 {
 				t.Errorf("expected no links, got %d: %+v", len(links), links)
+			}
+		})
+	}
+}
+
+// An even backslash run is escaped backslashes before a live link, and a ---
+// block without a closing line is ordinary markdown, not frontmatter.
+func TestScanLiveDespiteLookalikes(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+	}{
+		{"escaped backslash then link", `\\[[foo]]`},
+		{"unclosed frontmatter", "---\n[[foo]]\n"},
+		{"link after frontmatter", "---\nkey: v\n---\n[[foo]]\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			links := Scan([]byte(tt.src))
+			if len(links) != 1 || links[0].Target != "foo" {
+				t.Errorf("expected one live link to foo, got %+v", links)
 			}
 		})
 	}

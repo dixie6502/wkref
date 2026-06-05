@@ -37,8 +37,8 @@ func Forward(tr *tree.Tree, rel string) ([]ForwardLink, error) {
 	}
 	forward := []ForwardLink{}
 	for _, link := range wikilink.Scan(src) {
-		if link.Target == "" {
-			continue // intra-file anchor, not a cross-file reference
+		if !link.CrossFile() {
+			continue
 		}
 		forward = append(forward, ForwardLink{
 			File: rel, Line: link.Line, Target: link.Target, Paths: tr.Index[link.Target],
@@ -54,16 +54,16 @@ func Forward(tr *tree.Tree, rel string) ([]ForwardLink, error) {
 func Backward(tr *tree.Tree, rel string) ([]Backlink, error) {
 	base := tree.Basename(rel)
 	backward := []Backlink{}
-	for _, file := range tr.Files {
-		src, err := os.ReadFile(tr.Abs(file))
-		if err != nil {
-			return nil, err
-		}
+	err := tr.EachFile(func(file string, src []byte) error {
 		for _, link := range wikilink.Scan(src) {
 			if link.Target == base {
 				backward = append(backward, Backlink{File: file, Line: link.Line, Target: link.Target})
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return backward, nil
 }

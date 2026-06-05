@@ -4,21 +4,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/alxn0/wkref/tree/treetest"
 )
 
 func build(t *testing.T, files map[string]string) string {
 	t.Helper()
-	root := t.TempDir()
-	for path, content := range files {
-		full := filepath.Join(root, filepath.FromSlash(path))
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return root
+	return treetest.Build(t, files)
 }
 
 func read(t *testing.T, path string) string {
@@ -153,6 +145,101 @@ func TestDestinationOutsideRootRefuses(t *testing.T) {
 	}
 	if !exists(filepath.Join(root, "notes/foo.md")) {
 		t.Error("source moved despite destination outside root")
+	}
+}
+
+// A source in an excluded directory is outside the namespace; renaming it
+// must refuse rather than rewrite links that belong to an enumerated file
+// sharing the basename.
+func TestExcludedSourceRefuses(t *testing.T) {
+	root := build(t, map[string]string{
+		"_drafts/note.md": "draft",
+		"docs/note.md":    "real",
+		"index.md":        "see [[note]]",
+	})
+	_, err := Run(root, filepath.Join(root, "_drafts/note.md"), filepath.Join(root, "_drafts/renamed.md"), false)
+	if err == nil {
+		t.Fatal("expected error for excluded source, got nil")
+	}
+	if got := read(t, filepath.Join(root, "index.md")); got != "see [[note]]" {
+		t.Errorf("index.md modified despite refused mv: %q", got)
+	}
+	if !exists(filepath.Join(root, "_drafts/note.md")) {
+		t.Error("excluded source was moved")
+	}
+}
+
+// A destination in an excluded directory would silently take the file out of
+// the namespace while rewriting links to the now-unreachable name.
+func TestExcludedDestinationRefuses(t *testing.T) {
+	root := build(t, map[string]string{
+		"index.md": "[[foo]]",
+		"foo.md":   "x",
+	})
+	_, err := Run(root, filepath.Join(root, "foo.md"), filepath.Join(root, "_arch/bar.md"), false)
+	if err == nil {
+		t.Fatal("expected error for excluded destination, got nil")
+	}
+	if got := read(t, filepath.Join(root, "index.md")); got != "[[foo]]" {
+		t.Errorf("index.md modified despite refused mv: %q", got)
+	}
+}
+
+// Non-.md operands leave the wikilink namespace: a foo.md -> foo.txt rename
+// would rewrite every [[foo]] to the unresolvable [[foo.txt]].
+func TestNonMarkdownDestinationRefuses(t *testing.T) {
+	root := build(t, map[string]string{
+		"index.md": "[[foo]]",
+		"foo.md":   "x",
+	})
+	for _, dest := range []string{"foo.txt", "bar"} {
+		_, err := Run(root, filepath.Join(root, "foo.md"), filepath.Join(root, dest), false)
+		if err == nil {
+			t.Fatalf("expected error for destination %q, got nil", dest)
+		}
+	}
+	if got := read(t, filepath.Join(root, "index.md")); got != "[[foo]]" {
+		t.Errorf("index.md modified despite refused mv: %q", got)
+	}
+}
+
+// A directory at the destination path must be refused up front — including in
+// dry-run, which previously printed a happy plan for an impossible move.
+func TestDirectoryDestinationRefuses(t *testing.T) {
+	root := build(t, map[string]string{
+		"foo.md":      "x",
+		"bar.md/keep": "bar.md is a directory",
+	})
+	for _, dryRun := range []bool{true, false} {
+		_, err := Run(root, filepath.Join(root, "foo.md"), filepath.Join(root, "bar.md"), dryRun)
+		if err == nil {
+			t.Fatalf("expected error for directory destination (dryRun=%v), got nil", dryRun)
+		}
+	}
+}
+
+// A symlinked subdirectory must not let the destination escape the root.
+func TestSymlinkedDestinationRefuses(t *testing.T) {
+	root := build(t, map[string]string{
+		"a.md": "hello [[a]]",
+		"b.md": "see [[a]]",
+	})
+	elsewhere := t.TempDir()
+	if err := os.Symlink(elsewhere, filepath.Join(root, "sub")); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Run(root, filepath.Join(root, "a.md"), filepath.Join(root, "sub/a2.md"), false)
+	if err == nil {
+		t.Fatal("expected error for destination escaping via symlink, got nil")
+	}
+	if !exists(filepath.Join(root, "a.md")) {
+		t.Error("source was moved despite escaping destination")
+	}
+	if exists(filepath.Join(elsewhere, "a2.md")) {
+		t.Error("file was written outside the root")
+	}
+	if got := read(t, filepath.Join(root, "b.md")); got != "see [[a]]" {
+		t.Errorf("b.md modified despite refused mv: %q", got)
 	}
 }
 

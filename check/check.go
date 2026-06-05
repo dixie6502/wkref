@@ -5,7 +5,6 @@
 package check
 
 import (
-	"os"
 	"sort"
 
 	"github.com/alxn0/wkref/tree"
@@ -40,19 +39,19 @@ func (r *Result) OK() bool {
 func Run(tr *tree.Tree) (*Result, error) {
 	result := &Result{Broken: []Broken{}, Collisions: []Collision{}}
 
-	for _, file := range tr.Files {
-		src, err := os.ReadFile(tr.Abs(file))
-		if err != nil {
-			return nil, err
-		}
+	err := tr.EachFile(func(file string, src []byte) error {
 		for _, link := range wikilink.Scan(src) {
-			if link.Target == "" {
-				continue // intra-file anchor, not a cross-file reference
+			if !link.CrossFile() {
+				continue
 			}
 			if _, ok := tr.Index[link.Target]; !ok {
 				result.Broken = append(result.Broken, Broken{File: file, Line: link.Line, Link: link.Target})
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	for base, files := range tr.Index {
