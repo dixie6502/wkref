@@ -224,6 +224,26 @@ func TestSymlinkedDestinationRefuses(t *testing.T) {
 	}
 }
 
+// A file named ".md" has an empty basename; no wikilink resolves to it.
+// Renaming it must not rewrite intra-file [[#anchor]] links (whose Target is
+// also empty) into [[new#anchor]] cross-file links.
+func TestEmptyBasenameSourceNoRewrites(t *testing.T) {
+	root := treetest.Build(t, map[string]string{
+		".md":      "x",
+		"index.md": "jump [[#section]] and [[#top|Top]]",
+	})
+	res, err := Run(root, filepath.Join(root, ".md"), filepath.Join(root, "renamed.md"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Replacements) != 0 {
+		t.Errorf("expected no replacements, got %+v", res.Replacements)
+	}
+	if got := treetest.Read(t, filepath.Join(root, "index.md")); got != "jump [[#section]] and [[#top|Top]]" {
+		t.Errorf("anchor links rewritten: %q", got)
+	}
+}
+
 func TestSelfLinkRewritten(t *testing.T) {
 	root := treetest.Build(t, map[string]string{
 		"notes/foo.md": "I am [[foo]] linking to myself",

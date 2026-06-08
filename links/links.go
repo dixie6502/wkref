@@ -56,7 +56,10 @@ func Backward(tr *tree.Tree, rel string) ([]Backlink, error) {
 	backward := []Backlink{}
 	err := tr.EachFile(func(file string, src []byte) error {
 		for _, link := range wikilink.Scan(src) {
-			if link.Target == base {
+			// CrossFile guards an empty base (a file named ".md"): without it
+			// every intra-file [[#anchor]] link, whose Target is empty, would
+			// be reported as a backlink.
+			if link.CrossFile() && link.Target == base {
 				backward = append(backward, Backlink{File: file, Line: link.Line, Target: link.Target})
 			}
 		}

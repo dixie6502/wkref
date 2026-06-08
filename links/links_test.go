@@ -99,6 +99,23 @@ func TestBackwardSkipsCodeFence(t *testing.T) {
 	}
 }
 
+// A file named ".md" has an empty basename; no wikilink resolves to it. Its
+// backlinks must be empty, not every intra-file [[#anchor]] link (whose Target
+// is also empty).
+func TestBackwardEmptyBasenameHasNoAnchorBacklinks(t *testing.T) {
+	tr := load(t, map[string]string{
+		".md":      "x",
+		"index.md": "[[#section]] and [[#top|Top]]",
+	})
+	got, err := Backward(tr, ".md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected no backlinks, got %+v", got)
+	}
+}
+
 func TestBackwardMatchesByBasenameUnderCollision(t *testing.T) {
 	tr := load(t, map[string]string{
 		"a/foo.md": "x",

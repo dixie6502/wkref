@@ -57,7 +57,10 @@ func Run(root, path string, dryRun, force bool) (*Result, error) {
 	// and the unwrap pass are both skipped.
 	pending := map[string][]byte{} // root-rel file -> new content
 	if len(tr.Index[base]) == 1 {
-		match := func(l wikilink.Link) bool { return l.Target == base }
+		// CrossFile guards the degenerate empty basename (a file named ".md"):
+		// without it, base == "" would match every intra-file [[#anchor]] link
+		// in the tree and erase it, since those carry an empty Target.
+		match := func(l wikilink.Link) bool { return l.CrossFile() && l.Target == base }
 		err := tr.EachFile(func(file string, src []byte) error {
 			if file == rel {
 				return nil // self-links die with the file
@@ -94,7 +97,11 @@ func Run(root, path string, dryRun, force bool) (*Result, error) {
 // per line so the refusal doubles as the preview.
 func refusal(rel string, unlinks []Unlink) error {
 	var b strings.Builder
-	fmt.Fprintf(&b, "deleting %s would break %d links (use --force to unlink them):", rel, len(unlinks))
+	noun := "links"
+	if len(unlinks) == 1 {
+		noun = "link"
+	}
+	fmt.Fprintf(&b, "deleting %s would break %d %s (use --force to unlink them):", rel, len(unlinks), noun)
 	for _, u := range unlinks {
 		fmt.Fprintf(&b, "\n  %s:%d:%d %s", u.File, u.Line, u.Col, u.Old)
 	}

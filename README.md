@@ -76,10 +76,12 @@ Flags:
 | `--dry-run` | `mv`, `rm` | Print the plan; change nothing on disk. |
 | `--force` | `rm` | Delete even when it breaks links, unlinking them. |
 
-Exit codes: `0` ok, `1` problems found (`check`) or operation refused (`mv`,
-unforced link-breaking `rm`), `2` usage error, invalid root, or file operand
-not in the tree. `orphans`, `links`, and `backlinks` exit `0` whenever they
-run; `-h`/`--help` prints usage and exits `0` on every subcommand.
+Exit codes: `0` ok, `1` problems found (`check`) or operation refused (`mv`, or
+an unforced link-breaking `rm`), `2` usage error or invalid root. A file operand
+outside the tree is a refused operation for `mv`/`rm` (exit `1`) but a usage
+error for the `links`/`backlinks` queries (exit `2`). `orphans`, `links`, and
+`backlinks` exit `0` whenever they run; `-h`/`--help` prints usage and exits `0`
+on every subcommand.
 
 ## Usage
 

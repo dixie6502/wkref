@@ -85,8 +85,11 @@ func Run(root, oldPath, newPath string, dryRun bool) (*Result, error) {
 	// still resolve. Only a real rename rewrites references.
 	pending := map[string][]byte{} // root-rel file -> new content
 	if newBase != oldBase {
+		// CrossFile guards an empty oldBase (a file named ".md"): without it
+		// every intra-file [[#anchor]] link, whose Target is empty, would match
+		// and be rewritten into a [[newBase#anchor]] cross-file link.
 		matchOld := func(l wikilink.Link) (string, bool) {
-			return newBase, l.Target == oldBase
+			return newBase, l.CrossFile() && l.Target == oldBase
 		}
 		err := tr.EachFile(func(file string, src []byte) error {
 			content, edits := wikilink.Rewrite(src, matchOld)

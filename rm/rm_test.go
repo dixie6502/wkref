@@ -178,9 +178,9 @@ func TestOutsideRootRefuses(t *testing.T) {
 	}
 }
 
-// A file in an excluded directory is outside the namespace; deleting it must
-// refuse rather than unwrap links that belong to an enumerated file sharing
-// the basename.
+// A file in an excluded directory is outside the namespace: rm refuses it at
+// operand resolution (like mv), never reaching the unwrap pass — so the
+// enumerated namesake's links are left untouched.
 func TestExcludedFileRefuses(t *testing.T) {
 	root := treetest.Build(t, map[string]string{
 		"_drafts/note.md": "draft",
@@ -196,6 +196,29 @@ func TestExcludedFileRefuses(t *testing.T) {
 	}
 	if !treetest.Exists(filepath.Join(root, "_drafts/note.md")) {
 		t.Error("excluded file was deleted")
+	}
+}
+
+// A file named ".md" has an empty basename. No wikilink can resolve to it, so
+// rm must delete it without matching the empty-Target intra-file [[#anchor]]
+// links elsewhere (which would otherwise be erased).
+func TestEmptyBasenameDeletesWithoutUnwrapping(t *testing.T) {
+	root := treetest.Build(t, map[string]string{
+		".md":      "x",
+		"index.md": "jump [[#section]] and [[#top|Top]] here",
+	})
+	res, err := Run(root, filepath.Join(root, ".md"), false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Unlinks) != 0 {
+		t.Errorf("expected no unlinks, got %+v", res.Unlinks)
+	}
+	if treetest.Exists(filepath.Join(root, ".md")) {
+		t.Error("file still exists")
+	}
+	if got := treetest.Read(t, filepath.Join(root, "index.md")); got != "jump [[#section]] and [[#top|Top]] here" {
+		t.Errorf("anchor links erased: %q", got)
 	}
 }
 
