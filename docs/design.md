@@ -4,7 +4,7 @@ A record of choices made and the alternatives rejected, so the rationale survive
 
 ## Scope and boundaries
 
-**Six subcommands: `mv`, `rm`, `check`, `orphans`, `links`, and `backlinks`.** All are chore operations — initiated deliberately, run occasionally, no interactive component. `mv`, `rm`, and `check` carry the integrity work; `orphans`, `links`, and `backlinks` are read-only discoverability aids: informational listings, not pass/fail tests. Richer queries (`tags`), discovery (`graph`), index export, and editor wiring are out of scope. The tool earns its place because parsing wikilinks reliably across a tree is not shell work; everything beyond that earns its own place only when concrete friction appears.
+**Seven subcommands: `mv`, `rm`, `check`, `orphans`, `links`, `backlinks`, and `cluster`.** All are chore operations — initiated deliberately, run occasionally, no interactive component. `mv`, `rm`, and `check` carry the integrity work; `orphans`, `links`, `backlinks`, and `cluster` are read-only discoverability aids: informational listings, not pass/fail tests. Richer queries (`tags`), graph *export/visualization*, index export, and editor wiring are out of scope. The tool earns its place because parsing wikilinks reliably across a tree is not shell work; everything beyond that earns its own place only when concrete friction appears — which is why `cluster` is in (a relocation chore that emits a plain file list) while graph export is out (it would need a new output format that has not earned its place). See the `cluster` section.
 
 **Wikilinks only.** Path links (`[text](foo.md)`) are `mdref`'s domain. Embedded images, HTML, frontmatter references are not parsed. The grammar handled is exactly the four-form wikilink: `[[t]]`, `[[t|alias]]`, `[[t#anchor]]`, `[[t#anchor|alias]]`. Anything else is ignored.
 
@@ -94,9 +94,25 @@ Lets `wkref check` slot into git pre-commit hooks or cron without further plumbi
 
 **`wkref links <file>`** lists `<file>`'s outgoing links in document order, one `link: <file>:<line> [[<target>]] -> <resolution>` line per occurrence, where `<resolution>` is the matching tree file(s) — several under a collision — or `(broken)`. **`wkref backlinks <file>`** lists every link whose target matches `<file>`'s basename, one `backlink: <file>:<line> [[<target>]]` line per occurrence. Both are discoverability aids in the `orphans` mold: they always exit `0` on success (a file with no backlinks is not a fault; broken links are `check`'s verdict to render).
 
-**Why queries came in scope after all** (reversing the v1 "no queries" decision): `rg '\[\[name\]\]'` matches occurrences inside code fences and inline code — exactly the false positives the scanner exists to skip — and cannot resolve a target basename to its file. Both queries reuse the scanner and index that `mv`/`check` already carry; the marginal surface is one small package. `tags` and `graph` remain out: they need frontmatter parsing and an output format respectively, neither of which has earned its place.
+**Why queries came in scope after all** (reversing the v1 "no queries" decision): `rg '\[\[name\]\]'` matches occurrences inside code fences and inline code — exactly the false positives the scanner exists to skip — and cannot resolve a target basename to its file. Both queries reuse the scanner and index that `mv`/`check` already carry; the marginal surface is one small package. `tags` and graph *export* remain out: they need frontmatter parsing and a visualization output format respectively, neither of which has earned its place. (`cluster`, added later, is not graph export — it reuses `links.Forward` and emits a plain file list; see its section.)
 
 **The operand is a path, not a basename** — `dir/name.md` form, like `mv`'s operands, resolved inside `--root` and required to name an enumerated tree file (so excluded `_`/`.` directories refuse). A path picks one file unambiguously where a bare basename couldn't under a collision; on a flat tree the two coincide anyway. `backlinks` then matches by the operand's *basename*, mirroring link resolution — under a collision every file sharing the name has identical backlinks, which is the resolution model reported faithfully, not a bug. Self-links count as backlinks: a `[[self]]` inside the file points at it like any other link (consistent with `orphans`, where a self-link makes a file non-orphan).
+
+## `cluster` semantics
+
+**`wkref cluster <file>`** lists the connected component of `<file>` in the wikilink graph: the file itself plus every file transitively reachable by following links **in either direction**. One root-relative path per line.
+
+**Why it exists.** Relocating a sub-tree of notes to another wikilink tree must move every file the set links to *and* every file that links into it, or a link breaks. Chasing `links`/`backlinks` to a fixpoint by hand is exactly the kind of cross-file bookkeeping the tool exists to absorb. This is the concrete friction the scope rule waits for — distinct from the rejected graph *export*, which is a presentation feature needing an output format.
+
+**Why the component is precisely the safe move-set.** On a move of a subset `S` to another tree, a link `A→B` breaks iff exactly one of `A`,`B` is in `S` (the surviving endpoint can no longer resolve the one that left). So `S` breaks no link iff every edge has both endpoints inside it — i.e. `S` is a union of connected components of the *undirected* graph. The minimal such set containing the seed is its connected component. Direction is followed both ways for the same reason: an incoming link breaks just as a outgoing one does.
+
+**Built in one pass.** Each tree file's outgoing links (resolved by `links.Forward`) become undirected edges; symmetrizing them captures backlinks too, so `links.Backward` is not needed and the tree is scanned once, not once per visited node. A breadth-first walk from the seed collects the component.
+
+**Edge resolution mirrors the rest of the tool.** Broken links resolve to no file and add no edge — they cannot break further, and naming a missing target is `check`'s verdict, not `cluster`'s. Under a collision a link resolves to several files; all are pulled in, because moving only some could change which one `[[name]]` resolves to. A `.md` file's empty basename is guarded the same way `links`/`backlinks` guard it (via `CrossFile`).
+
+**Always exits `0` on success**, like `orphans`: a discoverability aid renders no verdict. An operand outside the tree is a usage error (exit `2`), same as the other queries.
+
+**Output is bare paths, no `prefix:`.** The sole divergence from the one-event-per-line `orphan:`/`link:` convention, and a deliberate one: `cluster`'s output is meant to *feed* a command (`… | xargs -I{} mv {} dest/`), so a prefix would only be a `cut` to strip. The other commands' output is meant to be *read*; `cluster`'s is meant to be *piped*. Rejected: a `--format`/`--null` flag — the flag surface stays small (`--root` only), and the bare list serves the one workflow the command is for.
 
 ## Wikilink grammar handled
 
@@ -157,6 +173,7 @@ wkref/
 ├── check/         # broken/collision analysis
 ├── orphans/       # unreferenced-file analysis
 ├── links/         # per-file forward/backward link queries
+├── cluster/       # connected-component (relocation set) query
 ├── output/        # text formatters
 └── go.mod
 ```
@@ -171,7 +188,7 @@ Target: ~400 lines of Go excluding tests. Tests roughly 1:1 with implementation 
 
 ## Things deliberately not done
 
-- **No queries beyond `links`/`backlinks`.** Tag listing and graph export stay out of scope. The per-file link queries were originally excluded too ("`rg` covers the 80% case") — reversed once the 20% mattered: `rg` cannot skip code fences or resolve basenames. See the `links`/`backlinks` section for the rationale.
+- **Queries are `links`, `backlinks`, and `cluster` only.** Tag listing and graph *export/visualization* stay out of scope. The per-file link queries were originally excluded too ("`rg` covers the 80% case") — reversed once the 20% mattered: `rg` cannot skip code fences or resolve basenames. `cluster` followed when a concrete chore (relocating a linked set between trees) demanded the transitive closure and a `mv`-ready list. See the `links`/`backlinks` and `cluster` sections for the rationale.
 - **No `wkref index` subcommand.** The basename index is computed internally by `mv` and `check`; not exposed. Add back if a real external consumer appears.
 - **No interactive UI.** No pickers, no prompts, no TUI. Composable with `fzf` from the shell if wanted.
 - **No edit operations beyond `mv` and `rm`.** No "add tag", no "fix broken link interactively", no template stamping. Editor work, not tool work.

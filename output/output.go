@@ -71,3 +71,11 @@ func Backlinks(w io.Writer, backward []links.Backlink) {
 		fmt.Fprintf(w, "backlink: %s:%d [[%s]]\n", b.File, b.Line, b.Target)
 	}
 }
+
+// Cluster writes one root-relative path per line, no prefix: the connected
+// component of the queried file, ready to pipe into mv.
+func Cluster(w io.Writer, files []string) {
+	for _, file := range files {
+		fmt.Fprintln(w, file)
+	}
+}

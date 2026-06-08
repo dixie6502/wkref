@@ -30,7 +30,7 @@ PRs won't be answered for the moment.
 
 ## Functionality
 
-Six subcommands, all chore operations — run occasionally, no interactive part.
+Seven subcommands, all chore operations — run occasionally, no interactive part.
 
 - `wkref mv <old> <new> --root <dir>` — move a file and rewrite every `[[link]]`
   whose target basename matches. Paths are given in `dir/name.md` form, like the
@@ -58,13 +58,19 @@ Six subcommands, all chore operations — run occasionally, no interactive part.
   `orphans`, a discoverability aid: always exits `0`.
 - `wkref backlinks <file> [--root <dir>]` — list every link **pointing at**
   `<file>`'s basename, as `file:line` occurrences. Always exits `0`.
+- `wkref cluster <file> [--root <dir>]` — list `<file>`'s **connected component**:
+  itself plus every file transitively linked to or from it, following links in
+  both directions. This is exactly the set safe to relocate to another tree
+  without breaking a link — moving a strict subset would break some link, moving
+  the whole component breaks none. Output is **bare paths**, one per line (no
+  prefix), so it pipes straight into `mv`. Like `orphans`, always exits `0`.
 
 `<file>` is given in `dir/name.md` form, like `mv`'s operands, and must name a
 file inside the tree.
 
 `--root` must be an existing directory; the tool does not walk up or look for a
-marker file. Read-only commands (`check`, `orphans`, `links`, `backlinks`)
-default to `.`; `mv` and `rm` require the flag.
+marker file. Read-only commands (`check`, `orphans`, `links`, `backlinks`,
+`cluster`) default to `.`; `mv` and `rm` require the flag.
 
 Output is text, one event per line. Pass/fail is the exit code, not the text.
 
@@ -79,9 +85,9 @@ Flags:
 Exit codes: `0` ok, `1` problems found (`check`) or operation refused (`mv`, or
 an unforced link-breaking `rm`), `2` usage error or invalid root. A file operand
 outside the tree is a refused operation for `mv`/`rm` (exit `1`) but a usage
-error for the `links`/`backlinks` queries (exit `2`). `orphans`, `links`, and
-`backlinks` exit `0` whenever they run; `-h`/`--help` prints usage and exits `0`
-on every subcommand.
+error for the `links`/`backlinks`/`cluster` queries (exit `2`). `orphans`,
+`links`, `backlinks`, and `cluster` exit `0` whenever they run; `-h`/`--help`
+prints usage and exits `0` on every subcommand.
 
 ## Usage
 
@@ -93,6 +99,9 @@ wkref orphans --root ~/notes/journal
 # per-file queries: outgoing and incoming links
 wkref links notes/foo.md                               # what foo.md points at
 wkref backlinks notes/foo.md --root ~/notes            # what points at foo.md
+
+# cluster: the full set safe to relocate together, piped into mv
+cd ~/notes && wkref cluster foo.md --root . | xargs -I{} mv {} ~/other-tree/
 
 # mv and rm require --root explicitly:
 wkref mv notes/old.md notes/new.md --root . --dry-run  # preview

@@ -1,8 +1,9 @@
 // Command wkref renames a markdown file and rewrites its [[wikilinks]] (mv),
 // deletes a file and unwraps the links that would break (rm), reports tree
 // integrity problems (check), lists files nothing links to (orphans), and
-// answers the per-file link queries (links, backlinks). It is a pure data
-// tool: paths and flags in, text out, an exit code. See the design docs.
+// answers the per-file link queries (links, backlinks), and lists a file's
+// connected component of linked files (cluster). It is a pure data tool: paths
+// and flags in, text out, an exit code. See the design docs.
 package main
 
 import (
@@ -12,6 +13,7 @@ import (
 	"os"
 
 	"github.com/alxn0/wkref/check"
+	"github.com/alxn0/wkref/cluster"
 	"github.com/alxn0/wkref/links"
 	"github.com/alxn0/wkref/mv"
 	"github.com/alxn0/wkref/orphans"
@@ -51,6 +53,8 @@ func run(args []string) int {
 		return runLinks(args[1:])
 	case "backlinks":
 		return runBacklinks(args[1:])
+	case "cluster":
+		return runCluster(args[1:])
 	case "-h", "--help", "help":
 		usage()
 		return exitOK
@@ -177,6 +181,20 @@ func runBacklinks(args []string) int {
 	return exitOK
 }
 
+func runCluster(args []string) int {
+	tr, rel, code := resolveQueryFile("cluster", args)
+	if tr == nil {
+		return code
+	}
+	files, err := cluster.Run(tr, rel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "wkref: %v\n", err)
+		return exitDirty
+	}
+	output.Cluster(os.Stdout, files)
+	return exitOK
+}
+
 // resolveQueryFile parses a per-file query subcommand (links, backlinks) and
 // resolves its single file operand to a root-relative path. Same contract as
 // resolveReadOnly: a nil tree means stop with the returned exit code.
@@ -269,5 +287,6 @@ usage:
   wkref orphans [--root <dir>]            (root defaults to .)
   wkref links <file> [--root <dir>]       (root defaults to .)
   wkref backlinks <file> [--root <dir>]   (root defaults to .)
+  wkref cluster <file> [--root <dir>]     (root defaults to .)
 `)
 }
